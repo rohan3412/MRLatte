@@ -141,7 +141,9 @@ if (process.platform === "win32") env.LOCALAPPDATA = path.join(tmp, "local");
 const maskFile = path.join(tmp, "ui-smoke-lesion.nii");
 writeMask(maskFile);
 // Software GL on CI runners: Chromium may refuse WebGL on a blocklisted GPU.
+// Linux: the unpacked app's chrome-sandbox isn't setuid outside an install.
 const flags = [`--remote-debugging-port=${PORT}`, "--ignore-gpu-blocklist"];
+if (process.platform === "linux") flags.push("--no-sandbox");
 
 const app = spawn(exe, flags, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
 let appLog = "";
@@ -181,7 +183,7 @@ async function main() {
 
   // 3. Open a mask the way a double-click does: a second launch with its path.
   const before = new Set((await appPages()).map((t) => t.id));
-  spawn(exe, [maskFile], { env, stdio: "ignore", detached: process.platform !== "win32" }).unref();
+  spawn(exe, [...(process.platform === "linux" ? ["--no-sandbox"] : []), maskFile], { env, stdio: "ignore", detached: process.platform !== "win32" }).unref();
   const win2 = await until("a window for the opened file", async () => (await appPages()).find((t) => !before.has(t.id)), 90000, 500);
   const page2 = await connect(win2.webSocketDebuggerUrl);
   pages.push(page2);

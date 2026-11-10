@@ -143,9 +143,13 @@ check that:
 
 - the bundled backend starts, seeds the template and finds dcm2niix;
 - the Module Store installs a module from its macOS wheels;
-- the packaged app launches its own backend and leaves nothing running after it quits.
+- the packaged app launches its own backend and leaves nothing running after it quits;
+- on screen (`tools/build/ui-smoke.mjs`, the same on every platform): the brain is drawn in 2D
+  and 3D, a mask opened like a double-click arrives in its own window, a drawing saves as a
+  lesion, and a report for it places it in the right hemisphere. Screenshots of each step are
+  attached to the run (`ui-shots-mac-<arch>`).
 
-They cannot check anything on screen.
+What they can't judge is how it looks on a real Mac's GPU.
 
 On a Mac you can build locally instead (Node + yarn, internet):
 
@@ -170,8 +174,8 @@ or open it, then go to System Settings → Privacy & Security and click **Open A
 `xattr` route also clears the bundled Python and dcm2niix, which macOS may otherwise question
 separately.
 
-**Try on a real Mac before a release.** The smoke tests can't see the screen, so check these by
-hand:
+**Try on a real Mac before a release.** The on-screen test runs on a CI runner's software
+graphics, so check these by hand:
 
 - the MNI152 viewer in 2D and 3D, with a tract overlay;
 - DICOM import;
@@ -183,6 +187,21 @@ hand:
 The module root on macOS is `~/Library/Application Support/MRLatte/modules`. The one-click Python
 modules pin macOS wheels next to the Windows ones (`tools/scripts/pin_python_modules.py` tags each
 compiled wheel with its platform), so the Module Store works the same way there.
+
+## Building for Linux
+
+A Linux AppImage (x64) is built by GitHub Actions in `.github/workflows/linux-build.yml`, on the
+same pushes as the Windows build or by hand. It uses the macOS bundle script
+(`tools/build/assemble-bundle.sh --arch x64` runs on Linux too) and `yarn dist:linux`, then
+`tools/build/linux-smoke-test.sh` (the bundle and app checks above) and the on-screen test, on a
+virtual display. The run attaches `MRLatte-<version>-linux-x64.AppImage` and the screenshots.
+
+The bundle and the one-click modules use manylinux wheels for glibc 2.28 and older, so the
+AppImage runs on Ubuntu 20.04 / Debian 10 / RHEL 8 and newer. To run it: `chmod +x` the file and
+open it. The app's data, modules included, lives in `~/.config/MRLatte`. On Linux the AppImage
+starts without Chromium's sandbox (`electron.js`): an AppImage can't carry the sandbox's setuid
+helper, and Ubuntu 24.04 blocks the other way it works, so it would not start at all there.
+Not done yet: double-click file associations (an AppImage registers none by itself).
 
 ## Docker
 

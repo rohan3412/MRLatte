@@ -158,7 +158,9 @@
         "AppImage"
       ],
       "category": "Science",
-      "icon": "electron/build-resources/icon.png"
+      "icon": "electron/build-resources/icon.png",
+      "executableName": "mrlatte",
+      "artifactName": "MRLatte-${version}-linux-${arch}.${ext}"
     },
     "mac": {
       "target": [

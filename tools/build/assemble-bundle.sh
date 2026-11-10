@@ -126,10 +126,12 @@ pipi() {  # target requirements-file [extra pip args]
 # Wheels for macOS 12 and newer, whatever macOS builds the bundle (pip would
 # otherwise take wheels for the build machine's own, newer, version). The same
 # floor as pin_python_modules.py's module pins and package.json's
-# mac.minimumSystemVersion. Linux: manylinux2014 wheels (glibc 2.17), which
-# run on every current distribution; the module pins use the same tag.
-if [ "$OS" = mac ]; then PLAT="macosx_12_0_${WANT_CPU}"; else PLAT="manylinux2014_x86_64"; fi
-MACOS_FLOOR=(--only-binary=:all: --platform "$PLAT"
+# mac.minimumSystemVersion. Linux: glibc 2.28 and older (Ubuntu 20.04+, RHEL
+# 8+); pip takes only the tags it is given and packages ship either the newer
+# or the older one, so all are listed, as in the module pins.
+if [ "$OS" = mac ]; then PLATS=(--platform "macosx_12_0_${WANT_CPU}")
+else PLATS=(--platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64); fi
+MACOS_FLOOR=(--only-binary=:all: "${PLATS[@]}"
              --python-version 3.11 --implementation cp --abi cp311)
 [ "$VIEWER" = 1 ] && [ "$FULL" = 1 ] && { echo "--viewer and --full are opposites: pass one of them" >&2; exit 2; }
 REQ="$REPO_ROOT/backend/requirements-frozen.txt"

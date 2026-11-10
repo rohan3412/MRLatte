@@ -366,7 +366,7 @@ def test_shipped_python_modules_pin_files_and_never_duplicate_the_bundle():
         assert m["bytes"] == sum(s["bytes"] for s in windows), m["id"]
         # Compiled wheels are pinned for every platform the app ships on.
         tags = {s["platform"] for s in pinned if s.get("platform")}
-        assert not tags or tags == {"win_amd64", "macosx_arm64", "macosx_x86_64"}, (m["id"], tags)
+        assert not tags or tags == {"win_amd64", "macosx_arm64", "macosx_x86_64", "linux_x86_64"}, (m["id"], tags)
 
 
 def test_a_second_install_while_one_runs_is_refused(env, monkeypatch):

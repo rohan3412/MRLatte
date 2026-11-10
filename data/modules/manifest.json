@@ -1034,6 +1034,13 @@
         },
         {
           "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/02/03/74fe2a4cb3817d94d86402f2506554130a2f01414e299b5a843e5a8a957f/numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "89cd468399cfd2504718f0ba50e410dca55a170b61a02ad92bb18c8a65186e93",
+          "bytes": 16918164,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/3b/d7/601b6396b33536811668935faa790112266c70661be94555999be431f86f/nibabel-5.4.2-py3-none-any.whl",
           "sha256": "553482c5f1e1034fc312edf6fb7f32236c0056439845d1c29293b7e8c98d4854",
           "bytes": 3300985
@@ -1097,6 +1104,13 @@
           "sha256": "1f95b894f13729334fb990162e911c9e5dc1ab390c58aa6cbecb389c5b5e28ec",
           "bytes": 31613675,
           "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/09/7d/af933f0f6e0767995b4e2d705a0665e454d1c19402aa7e895de3951ebb04/scipy-1.17.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "43af8d1f3bea642559019edfe64e9b11192a8978efbd1539d7bc2aaa23d92de4",
+          "bytes": 35349300,
+          "platform": "linux_x86_64"
         }
       ]
     },
@@ -1294,6 +1308,27 @@
           "platform": "macosx_x86_64"
         },
         {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0b/e4/838f5bec586e412001593b751ff56a1744ba1cbf0c6bd066f8f4429b2a55/dipy-1.12.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "65013b80f6e61c4c52de7b61da6e36afa76b09ccfe8c456414519b36609d7bb6",
+          "bytes": 10871830,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/52/a0/c1f604538ff6db22a0690be2dc44ab59178e115f63c917794e529356ab23/h5py-3.16.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+          "sha256": "fb1720028d99040792bb2fb31facb8da44a6f29df7697e0b84f0d79aff2e9bd3",
+          "bytes": 5027150,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/b3/50/8e4d59b3e344405d8393d6cc5cc92754d3cc1d81134041ebffd3f5ab73e6/cachebox-5.2.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "ae5bf8755bc66bcf42e7ca5c42d703a041a7aaad58f9a0c3be54d5b1cefd2641",
+          "bytes": 395765,
+          "platform": "linux_x86_64"
+        },
+        {
           "type": "pip",
           "requirements": "requirements-dissection.txt",
           "packages": [
@@ -1379,6 +1414,13 @@
           "sha256": "36658792fe2a62814cbfedb3b236ac722ca7e00953241726bc4a3a26cc7ef5a7",
           "bytes": 42685058,
           "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/f4/ec/301532fb2003e6557e6a12106eb1df572ed6f74c08c05c2e7a8913353383/simpleitk-2.5.6-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "99242c333ed17138134e9749f3a484518f41baebab0fc0f0fe7c657ab8090c07",
+          "bytes": 52798369,
+          "platform": "linux_x86_64"
         },
         {
           "type": "pip",
@@ -1708,6 +1750,62 @@
           ]
         },
         {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/a1/94/9808e8c9271424120289b9028a657da336ad7e43da0647f62e4f6011d19b/pyrsistent-0.20.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "cae40a9e3ce178415040a0383f00e8d68b569e97f31928a3a8ad37e3fde6df6a",
+          "bytes": 120002,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/52/a0/c1f604538ff6db22a0690be2dc44ab59178e115f63c917794e529356ab23/h5py-3.16.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+          "sha256": "fb1720028d99040792bb2fb31facb8da44a6f29df7697e0b84f0d79aff2e9bd3",
+          "bytes": 5027150,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/42/74/2a2b22953de15c6c8a80debf26db3047e4e8a5a5db6dd7c2c6c01eec0605/aiohttp-3.14.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "50a195903119008fe9cc68710535eb37f556ffffd6a7759afe70a2c145587045",
+          "bytes": 1929915,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/d0/38/b8403d97ae5273002fa664c3c440c5cc186082fa0ba20fcc93885d13a686/multidict-7.2.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "3b7542fad2706595c1b1853b46f2c3c4ae5cc5a6252b7225f294d607a29e1bdf",
+          "bytes": 510054,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/2b/bf/8edaec939d7411a58bccb4dc4310246caea5050576ff91b5f5abf6079a9c/wrapt-2.5.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "c25c594f58ecb676358d6d6b0ff068b8bbbc506dc831c6d17876460c66ce39c2",
+          "bytes": 240110,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/95/0c/a71501bbc1a674ff72c4d6c2b75f4d9a5af819f5244c3a7558080a8802c5/yarl-1.25.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "d5add7b4ca7afeea91d52e4d4e4db3b1fe9885b71f07054560d8c4296b7441a2",
+          "bytes": 117728,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/11/b1/71a477adc7c36e5fb628245dfbdea2166feae310757dea848d02bd0689fd/frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+          "sha256": "2552f44204b744fba866e573be4c1f9048d6a324dfe14475103fd51613eb1d1f",
+          "bytes": 231067,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/c7/06/519a5ebb48b6f94beb48396e55c905f12246a25c3a3608a7ec7bceabf50e/propcache-0.5.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "6e9368e87a3efc285e559131092c5db643eb8e56de4ee42064d5baec22ef2bb5",
+          "bytes": 235381,
+          "platform": "linux_x86_64"
+        },
+        {
           "type": "pip",
           "requirements": "requirements-validation.txt",
           "packages": [
@@ -1977,6 +2075,62 @@
           "sha256": "326c188f92084bf58664229f4578eeab6176313b37cd5dfc85abd92b94130c58",
           "bytes": 8823771,
           "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/2e/a4/1ca765c63a60e3096ae2ad132eb25f6f7eab0377418cd0472808befd9665/matplotlib-3.11.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "07d9b9fa60cd4c393692f50d0bb03123242ddf61c99bb0e95e75feb354e7c1a8",
+          "bytes": 9854405,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/14/41/2d264868728f7cb2add91a605bea5f2aabd3da41889ee97746a586ec34ee/pandas-3.1.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "0a28602573f50453b57802d282f9f8cb7663aa10201127ecbbe95ed4a41c64ce",
+          "bytes": 12330371,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/5f/4b/6157f24ca425b89fe2eb7e7be642375711ab671135be21e6faa100f7448c/contourpy-1.3.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "51e79c1f7470158e838808d4a996fa9bac72c498e93d8ebe5119bc1e6becb0db",
+          "bytes": 355238,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/b3/74/6117d6bec5736133fffd5cc4500426ddd43c761df9b380c796cd2268c069/fonttools-4.67.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "59f44309ce78851c9621ee88e3f667ca3fbcc89dc0e8641336be3f12ba06bfd4",
+          "bytes": 5458613,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/89/00/05c2d0369ac322d22d5c05f84b5c4a6856fa6207fbae42869108a28f0383/kiwisolver-1.5.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "sha256": "95a02752aa032eef4aed01cda6d9b687c669bd0396bf4519eef8bba22a286720",
+          "bytes": 1438206,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/81/a5/a513b76c139a3915b43404324e55c0b7979ae4f0d39eb6f075b0282e90a8/markupsafe-3.0.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "6da83a088f8ef93b2d483a8232a4dbf4d69d3d8496b568a03c56becac43e1808",
+          "bytes": 22961,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/36/46/f509b74787f40ce0627501089d630b2c741b63b244c1f40b640b3b01e181/pillow-13.0.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "a625df9a2a5597fa5e5266e01aefc82604bb85d291e3547981e863560d75da6c",
+          "bytes": 7140667,
+          "platform": "linux_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/69/46/f8b95a7a16fd13b458401d5e85a63d88ecb3679f3649812d5fdbea4c8357/scikit_learn-1.9.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "sha256": "52a0703bbc07ad27f560fa63fa68e4c54dd735bfbbf65b4dd3c225dc7547b6df",
+          "bytes": 9315422,
+          "platform": "linux_x86_64"
         },
         {
           "type": "pip",

@@ -109,7 +109,8 @@ PYEOF
   # build ships numpy and nibabel but not SciPy (d17d366), so a module that
   # needs SciPy first needs the python-scipy module: the store refuses it with
   # a 409 until then. Install SciPy, then the dissection engine (dipy) on top,
-  # from their pinned macOS wheels, as the store's Install button does.
+  # from their pinned wheels for this platform, as the store's Install button
+  # does. (linux-smoke-test.sh runs this same bundle check on Linux.)
   install_module() {  # module-id
     local M="$1" J
     curl -fsS -X POST "http://127.0.0.1:$PORT/api/modules/$M/install" > "$DATA/start.json"       || fail "the store refused to install $M"
@@ -122,7 +123,7 @@ PYEOF
     [ "$(json_get "$DATA/job.json" "d.get('stage')")" = "done" ] || { cat "$DATA/job.json"; fail "installing $M failed"; }
     curl -fsS "http://127.0.0.1:$PORT/api/modules" > "$DATA/modules.json"
     [ "$(json_get "$DATA/modules.json" "next(m for m in d['modules'] if m['id'] == '$M')['installed']")" = "True" ]       || fail "$M is not installed after its job finished"
-    pass "Module Store installed $M from its macOS wheels"
+    pass "Module Store installed $M from its pinned wheels for this platform"
   }
   install_module python-scipy
   install_module tract-dissection-dipy

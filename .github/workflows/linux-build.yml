@@ -1,0 +1,87 @@
+# Builds and tests the Linux AppImage (x64), alongside the Windows and macOS
+# builds: tools/build/assemble-bundle.sh (the bundle, the same script as on
+# macOS), yarn dist:linux (the AppImage), tools/build/linux-smoke-test.sh
+# (backend, packaging, launch and quit) and tools/build/ui-smoke.mjs (the
+# window itself: 2D and 3D drawn, a file opened like a double-click, a drawing
+# saved, a report made; screenshots attached to the run). The app steps run on
+# a virtual display (xvfb).
+#
+# The AppImage is attached to each run as an artifact (kept 14 days).
+name: Linux build
+
+on:
+  # Every push, except ones that only touch documentation.
+  push:
+    branches: [macos, main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: AppImage (x64)
+    # 22.04: the oldest supported runner, so nothing is built against a newer
+    # glibc than the wheels' floor (2.28) needs.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22: the on-screen test uses its built-in WebSocket.
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: System tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsync file xvfb wmctrl
+
+      - name: Cache pinned downloads
+        uses: actions/cache@v4
+        with:
+          path: tools/build/downloads
+          key: downloads-linux-x64-${{ hashFiles('tools/build/assemble-bundle.sh') }}
+
+      - name: Assemble the bundle
+        run: bash tools/build/assemble-bundle.sh --arch x64
+
+      - name: Smoke test the bundle
+        run: bash tools/build/linux-smoke-test.sh bundle
+
+      - name: Package the AppImage
+        working-directory: frontend
+        run: yarn dist:linux
+
+      - name: Smoke test the app
+        run: xvfb-run -a -s "-screen 0 1280x800x24" bash tools/build/linux-smoke-test.sh app
+
+      - name: On-screen test
+        run: xvfb-run -a -s "-screen 0 1280x800x24" node tools/build/ui-smoke.mjs ../MRLatte-build/electron/linux-unpacked/mrlatte ui-shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots-linux-x64
+          path: ui-shots
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # upload-artifact only takes paths inside the workspace; the build output
+      # sits beside the repo (package.json directories.output).
+      - name: Collect the AppImage
+        run: mkdir -p dist && cp ../MRLatte-build/electron/MRLatte-*-linux-*.AppImage dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRLatte-linux-x64
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14

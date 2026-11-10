@@ -22,6 +22,12 @@ const { app, BrowserWindow, Menu, shell, dialog, ipcMain, session, nativeTheme }
 if (process.env.MRLATTE_USER_DATA_DIR) {
   try { app.setPath("userData", process.env.MRLATTE_USER_DATA_DIR); } catch (_e) { /* keep the default */ }
 }
+
+// Linux AppImage: Chromium's sandbox needs a setuid helper (an AppImage can't
+// carry one) or unprivileged user namespaces, which Ubuntu 24.04 turns off for
+// unconfined apps, so the AppImage would not start there at all. Its windows
+// only ever show MRLatte's own pages from its own local backend.
+if (process.platform === "linux" && process.env.APPIMAGE) app.commandLine.appendSwitch("no-sandbox");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");

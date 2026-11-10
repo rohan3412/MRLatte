@@ -56,18 +56,21 @@ MANIFEST = REPO / "data" / "modules" / "manifest.json"
 # Manifest tag -> pip --platform. macOS wheels are taken for macOS 12 and
 # newer (pip also accepts older ones), the floor assemble-bundle.sh installs
 # the bundle's own packages for and package.json's mac.minimumSystemVersion.
-# Linux: manylinux2014 (glibc 2.17, and the older manylinux tags), as the
-# bundle; the tag is what routers/modules.py _platform_tag() reports there.
+# Linux: glibc 2.28 and older (Ubuntu 20.04+, RHEL 8+). pip takes only the
+# tags it is given, and packages ship either the newer (numpy) or the older
+# (SimpleITK, matplotlib) tag, so all of them are listed; the same as the
+# bundle. The key is what routers/modules.py _platform_tag() reports there.
 PLATFORMS = {
-    "win_amd64": "win_amd64",
-    "macosx_arm64": "macosx_12_0_arm64",
-    "macosx_x86_64": "macosx_12_0_x86_64",
-    "linux_x86_64": "manylinux2014_x86_64",
+    "win_amd64": ["win_amd64"],
+    "macosx_arm64": ["macosx_12_0_arm64"],
+    "macosx_x86_64": ["macosx_12_0_x86_64"],
+    "linux_x86_64": ["manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64"],
 }
 
 
 def target(platform):
-    return ["--only-binary=:all:", "--platform", PLATFORMS[platform], "--python-version", "3.11",
+    plats = [a for p in PLATFORMS[platform] for a in ("--platform", p)]
+    return ["--only-binary=:all:", *plats, "--python-version", "3.11",
             "--implementation", "cp", "--abi", "cp311"]
 COMPILED = (".c", ".cc", ".cpp", ".pyx", ".pxd", ".f", ".f90")
 BUNDLED = []        # "name==version" of every package in the bundle; set in main()
