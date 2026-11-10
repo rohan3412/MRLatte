@@ -310,10 +310,14 @@ function sampleProcesses(tag) {
     try { return execFileSync(cmd, args, { encoding: "utf8", timeout: ms, maxBuffer: 32 * 1024 * 1024 }); }
     catch (e) { return String(e.stdout || e.message || ""); }
   };
+  // The helpers (renderer, GPU) run by their full path, so match on that, and
+  // leave out this test itself (its command line names the app too).
+  const notMe = (l) => !/\bnode\b.*ui-smoke/.test(l);
   if (process.platform === "darwin") {
-    const appDir = exe.split("/Contents/")[0];
+    // The main process shows the path it was started with (maybe relative).
+    const dirs = [path.resolve(exe), exe].map((p) => p.split("/Contents/")[0]);
     const ps = run("ps", ["-axo", "pid=,pcpu=,etime=,command="]);
-    const mine = ps.split("\n").filter((l) => l.includes(appDir));
+    const mine = ps.split("\n").filter((l) => dirs.some((d) => l.includes(d)) && notMe(l));
     out.push("processes (pid, %cpu, elapsed, command):", ...mine.map((l) => "  " + l.trim().slice(0, 220)));
     for (const l of mine) {
       const pid = l.trim().split(/\s+/)[0];
@@ -324,7 +328,8 @@ function sampleProcesses(tag) {
     }
   } else if (process.platform === "linux") {
     const ps = run("ps", ["-eo", "pid,ppid,pcpu,stat,wchan:24,etime,args"]);
-    out.push(...ps.split("\n").filter((l, i) => i === 0 || l.includes(exe)).map((l) => "  " + l.slice(0, 220)));
+    const full = path.resolve(exe);
+    out.push(...ps.split("\n").filter((l, i) => i === 0 || (l.includes(full) && notMe(l))).map((l) => "  " + l.slice(0, 220)));
   } else {
     // Only this exe's processes: an installed MRLatte may be running too.
     const exePath = path.resolve(exe).replace(/'/g, "''");

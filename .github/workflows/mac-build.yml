@@ -110,15 +110,15 @@ jobs:
       # screen). It still runs and uploads its screenshots; Apple Silicon (a
       # real Mac GPU), Windows and Linux keep it strict, and the Intel build
       # keeps its strict launch-and-quit test above. One retry with a fresh app
-      # (a pass on retry still warns). On Intel: Chromium's own software
-      # renderer (SwiftShader) and a smaller window, to see whether the freezes
-      # stop; a failure there shows as a warning on the run's page.
+      # (a pass on retry still warns); a failure on Intel shows as a warning on
+      # the run's page, with stack samples of the stuck processes in the
+      # artifact. Tried and dropped: SwiftShader (--use-angle=swiftshader),
+      # which froze both attempts at the home screen (10 Nov).
       - name: On-screen test
         id: ui
         continue-on-error: ${{ matrix.arch == 'x64' }}
         env:
           UI_SMOKE_RETRIES: "1"
-          UI_SMOKE_FLAGS: ${{ matrix.arch == 'x64' && '--use-angle=swiftshader --enable-unsafe-swiftshader' || '' }}
           UI_SMOKE_SIZE: ${{ matrix.arch == 'x64' && '1024x700' || '1280x800' }}
         run: node tools/build/ui-smoke.mjs "$(ls -d ../MRLatte-build/electron/mac*/MRLatte.app | head -1)/Contents/MacOS/MRLatte" ui-shots
 
