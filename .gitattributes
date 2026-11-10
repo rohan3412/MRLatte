@@ -1,0 +1,13 @@
+# Shell scripts run on macOS (tools/build/assemble-bundle.sh, CI). A Windows
+# checkout with core.autocrlf would otherwise hand them CRLF line endings,
+# which bash reads as part of each command.
+*.sh text eol=lf
+
+# The atlas modules' text files (label and metadata JSON, GIFTI surfaces) are
+# pinned by size and sha256 in data/modules/manifest.json as a Windows checkout
+# writes them: with CRLF endings (the repo stores LF). The installers, the
+# modules-v1 release zips and every Windows install hold those CRLF bytes, so
+# every checkout gets them too; on macOS or Linux (CI, the Mac bundle, Docker)
+# the pins would otherwise fail and the core atlases would not be seeded.
+data/modules/atlases/**/*.json text eol=crlf
+data/modules/atlases/**/*.gii text eol=crlf

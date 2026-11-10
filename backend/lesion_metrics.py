@@ -30,6 +30,34 @@ except Exception as exc:  # noqa: BLE001 -- absence must not break `import serve
     lqtpy = None
     _lqtpy_datasets = None
     _LQTPY_IMPORT_ERROR = exc
+# sys.path when an import of lqtpy last failed (None: not tried since).
+_LQTPY_FAILED_FOR = None
+
+
+def _ensure_lqtpy():
+    """lqtpy, importing it now if it wasn't there at startup: the LQTpy module
+    can be installed while MRLatte runs, and lands on sys.path then. Nothing
+    findable costs one find_spec; a findable lqtpy that fails to import (its
+    SciPy missing) is retried only once sys.path has changed, not per request."""
+    global lqtpy, _lqtpy_datasets, _LQTPY_IMPORT_ERROR, _LQTPY_FAILED_FOR
+    if lqtpy is not None:
+        return lqtpy
+    import importlib.util
+    import sys
+    try:
+        findable = importlib.util.find_spec("lqtpy") is not None
+    except (ImportError, ValueError):
+        findable = False
+    if not findable or _LQTPY_FAILED_FOR == tuple(sys.path):
+        return None
+    try:
+        import lqtpy as _lqtpy
+        import lqtpy.datasets as _datasets
+    except Exception as exc:  # noqa: BLE001 -- same rule as at import time
+        _LQTPY_IMPORT_ERROR, _LQTPY_FAILED_FOR = exc, tuple(sys.path)
+        return None
+    lqtpy, _lqtpy_datasets, _LQTPY_IMPORT_ERROR, _LQTPY_FAILED_FOR = _lqtpy, _datasets, None, None
+    return lqtpy
 
 
 class LesionMetricsError(Exception):
@@ -46,8 +74,9 @@ class LqtpyUnavailableError(LesionMetricsError):
 
     def __init__(self, message: str = None):
         super().__init__(message or (
-            "lqtpy is not installed in this backend environment. "
-            "Run: python -m pip install -e <path-to-LQTpy-clone> --no-deps "
+            "LQTpy is not installed. Install the LQTpy module from the module store "
+            "(it installs SciPy with it), or in a dev checkout: "
+            "python -m pip install -e <path-to-LQTpy-clone> --no-deps "
             f"(import failed with: {_LQTPY_IMPORT_ERROR!r})"
         ))
 
@@ -81,7 +110,7 @@ class InvalidThemeError(LesionMetricsError):
 
 
 def available() -> bool:
-    return lqtpy is not None
+    return _ensure_lqtpy() is not None
 
 
 def qc_available() -> bool:
@@ -89,11 +118,11 @@ def qc_available() -> bool:
     now. Separate from `available()`: lqtpy releases before 0.5.0 have no
     `qc` module at all, so an install that still carries one of those can
     import lqtpy without being able to run the checks. Never raises."""
-    return lqtpy is not None and hasattr(lqtpy, "qc")
+    return _ensure_lqtpy() is not None and hasattr(lqtpy, "qc")
 
 
 def version() -> "str | None":
-    return getattr(lqtpy, "__version__", "unknown") if lqtpy is not None else None
+    return getattr(lqtpy, "__version__", "unknown") if _ensure_lqtpy() is not None else None
 
 
 def import_error() -> "Exception | None":
@@ -189,7 +218,7 @@ def sync_atlases(force: bool = False) -> None:
     removed atlas is never offered or accepted even though lqtpy's own cache
     still holds it.
     """
-    if lqtpy is None:
+    if _ensure_lqtpy() is None:
         return
     descriptors = _eligible_descriptors()
     signature = {
@@ -214,7 +243,7 @@ def sync_atlases(force: bool = False) -> None:
 
 def bridged_atlas_ids() -> "list[str]":
     """MRLatte atlas ids currently valid for `compute_metrics`' `atlas_ids`."""
-    if lqtpy is None:
+    if _ensure_lqtpy() is None:
         return []
     sync_atlases()
     return sorted(_bridge_state.keys())
@@ -231,9 +260,9 @@ def preload(timeout_s: float = None) -> dict:
     asyncio.wait_for from the lifespan, same as any other blocking call.
     """
     t0 = time.monotonic()
-    result = {"available": lqtpy is not None, "atlas_ids": [], "duration_s": 0.0,
+    result = {"available": _ensure_lqtpy() is not None, "atlas_ids": [], "duration_s": 0.0,
               "error": None}
-    if lqtpy is None:
+    if _ensure_lqtpy() is None:
         result["duration_s"] = round(time.monotonic() - t0, 4)
         return result
     try:
@@ -265,7 +294,7 @@ def compute_metrics(lesion_path, atlas_ids, threshold: float = DEFAULT_THRESHOLD
     problems) propagate -- the router maps all of these to HTTP status
     codes; see routers/lesion_metrics.py.
     """
-    if lqtpy is None:
+    if _ensure_lqtpy() is None:
         raise LqtpyUnavailableError()
 
     sync_atlases()
@@ -331,7 +360,7 @@ def run_qc(lesion_path, *, mni: bool = True, threshold: float = DEFAULT_THRESHOL
     `status_code_for`.
     """
     if not qc_available():
-        if lqtpy is None:
+        if _ensure_lqtpy() is None:
             raise LqtpyUnavailableError()
         raise LqtpyUnavailableError(
             f"This backend's lqtpy (version {version()}) does not include the "
@@ -634,7 +663,7 @@ def build_report_fragments(lesion_path, atlas_ids, sections, threshold: float = 
     GeometryError, UnknownAtlasError) still raises, since every section would
     fail identically.
     """
-    if lqtpy is None:
+    if _ensure_lqtpy() is None:
         raise LqtpyUnavailableError()
 
     from lqtpy.report import fragments as report_fragments

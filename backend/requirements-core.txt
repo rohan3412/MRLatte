@@ -1,0 +1,18 @@
+# The viewer-only installer's embedded Python: just enough to serve the app and
+# its module store (install, verify, remove). No numpy, nibabel, SciPy or lqtpy:
+# the `python-numpy`, `python-scipy` and `lqtpy` modules bring those, so a
+# viewer-only install can grow back into the whole of MRLatte from the store.
+# requirements-frozen.txt (the standard installer) is this list plus numpy and
+# nibabel. The server must start on this list alone: core_packages.py and
+# tests/test_core_packages.py.
+#
+#   assemble-bundle.ps1 -Viewer   /   assemble-bundle.sh --viewer
+fastapi==0.110.1
+uvicorn==0.25.0
+python-dotenv>=1.0.1
+pydantic>=2.6.4
+tzdata>=2024.2
+requests>=2.31.0
+python-multipart>=0.0.9
+dcm2niix>=1.0.20220505
+Send2Trash>=1.8.2  # runtime: module uninstall recycles slot payloads instead of deleting them (routers/modules.py:_remove_payload). Pure Python, no transitive deps.

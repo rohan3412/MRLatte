@@ -1,5 +1,5 @@
-import React from "react";
-import { FlaskConical } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { FlaskConical, Sigma } from "lucide-react";
 import { SidebarSection } from "@/components/SidebarSection";
 import FileUploader from "@/components/FileUploader";
 import { UserLayerList } from "@/components/UserLayerList";
@@ -50,6 +50,17 @@ export function ActivationMapsSection({
   layerNotes,
   onNotesChange,
 }) {
+  // Each map's Clusters… button (inbox 4 Nov) opens the Cluster analysis fold
+  // below with that map chosen, the way a lesion's Report… button opens the
+  // Report section.
+  const [clusterOpen, setClusterOpen] = useState(false);
+  const [clusterLayerId, setClusterLayerId] = useState("");
+  const clusterFoldRef = useRef(null);
+  const openClustersFor = (id) => {
+    setClusterLayerId(id);
+    setClusterOpen(true);
+    setTimeout(() => clusterFoldRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
+  };
   return (
     <SidebarSection title="Activation maps" icon={FlaskConical} testId="section-activation"
       open={open} onOpenChange={onOpenChange} keepMounted
@@ -77,22 +88,41 @@ export function ActivationMapsSection({
         layerLabelAtlas={layerLabelAtlas}
         onLabelAtlasChange={handleLayerLabelAtlasChange}
         layerNotes={layerNotes} onNotesChange={onNotesChange}
+        renderLayerExtra={(map) => (
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-[13px] text-muted-foreground">Clusters</span>
+            <button
+              type="button"
+              onClick={() => openClustersFor(map.id)}
+              className="btn min-h-[26px] gap-1.5 px-2.5 text-[12px]"
+              title="Opens Cluster analysis with this map chosen"
+              data-testid={`clusters-open-${map.id}`}
+            >
+              <Sigma size={12} />Clusters…
+            </button>
+          </div>
+        )}
         {...{ handleUserToggle, handleUserOpacity, handleUserColormap, handleUserColormapInvert, handleUserClipChange, handleUserTransform, handleUserRemove, handleCalRangeChange, handleColorRangeChange, handleAutoColorRange, handleAutoThreshold, handleIgnoreZeroChange, handleInvertThresholdChange, histograms, requestHistogram, thresholdVolumes, scheduleThresholdVolume }}
       />
       {/* Folded under its name (sidebar declutter), like a lesion's overlap
           and report. */}
       {activationLayers.length > 0 && (
-        <Disclosure title="Cluster analysis" className="border-t border-border" testId="cluster-fold">
+        <div ref={clusterFoldRef}>
+        <Disclosure title="Cluster analysis" className="border-t border-border" testId="cluster-fold"
+          open={clusterOpen} onOpenChange={setClusterOpen}>
           <ClusterPanel
             bare
             viewerRef={viewerRef}
-            activationLayers={activationLayers.filter((l) => l.visible)}
+            layerId={clusterLayerId}
+            onLayerChange={setClusterLayerId}
+            activationLayers={activationLayers.filter((l) => l.visible || l.id === clusterLayerId)}
             atlasOptions={standardAtlases}
             onSelectAtlas={(id) => handleLayerLabelAtlasChange(activationLayers[0]?.id, id)}
             atlasRegions={atlasRegions}
             ensureAtlasLoaded={ensureAtlasLoaded}
           />
         </Disclosure>
+        </div>
       )}
     </SidebarSection>
   );

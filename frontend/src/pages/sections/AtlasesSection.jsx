@@ -74,7 +74,7 @@ export function AtlasesSection({
 
   return (
     <SidebarSection title="Atlases" icon={Database} testId="section-atlases" defaultOpen={false}
-      available={anyAtlas} unavailableHint="No atlas is installed — open the Atlas Manager to add one"
+      available={anyAtlas} unavailableHint="No atlas is installed — open the Atlas manager to add one"
       badge={stdAtlasActive + customAtlases.filter((l) => l.visible).length}>
 
       <div className="mb-2 flex items-center gap-1">
@@ -158,7 +158,7 @@ export function AtlasesSection({
       </div>
 
       <div className="pt-2">
-        <FileUploader label="Quick-load atlases" description=".nii .nii.gz .mgz · view only; use Manage → Import to install one with labels"
+        <FileUploader label="Quick-load atlases" description=".nii .nii.gz .mgz .mif · view only; use Manage → Import to install one with labels"
           testId="upload-atlas-button" multiple
           onFiles={serialUpload((f) => addUserFile(f, "atlas"))}
           onFile={(f) => addUserFile(f, "atlas")} />

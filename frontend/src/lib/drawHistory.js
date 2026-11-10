@@ -93,7 +93,9 @@ export function rleDecode(snap) {
 
 /**
  * Undo/redo stacks of RLE draw-bitmap snapshots. The caller owns the live
- * bitmap; this class only stores pre-op snapshots and hands them back.
+ * bitmap; this class only stores pre-op snapshots and hands them back. Each
+ * entry carries a short name for the edit ("Pen stroke", "Dilate"), so the
+ * Undo and Redo buttons can say what they will do (inbox 2 Nov).
  */
 export class DrawHistory {
   constructor(cap = 30) {
@@ -115,9 +117,19 @@ export class DrawHistory {
     return this.redoStack.length > 0;
   }
 
+  /** Name of the edit Undo would revert, or null. */
+  get undoLabel() {
+    return this.undoStack.length ? this.undoStack[this.undoStack.length - 1].label : null;
+  }
+
+  /** Name of the edit Redo would re-apply, or null. */
+  get redoLabel() {
+    return this.redoStack.length ? this.redoStack[this.redoStack.length - 1].label : null;
+  }
+
   /** Record a pre-op snapshot; starting a new edit invalidates the redo branch. */
-  push(encoded) {
-    this.undoStack.push(encoded);
+  push(encoded, label = "Edit") {
+    this.undoStack.push({ snap: encoded, label });
     if (this.undoStack.length > this.cap) this.undoStack.shift();
     this.redoStack = [];
   }
@@ -125,16 +137,18 @@ export class DrawHistory {
   /** Save the current state to redo and return the snapshot to restore, or null. */
   undo(currentEncoded) {
     if (!this.undoStack.length) return null;
-    this.redoStack.push(currentEncoded);
+    const e = this.undoStack.pop();
+    this.redoStack.push({ snap: currentEncoded, label: e.label });
     if (this.redoStack.length > this.cap) this.redoStack.shift();
-    return this.undoStack.pop();
+    return e.snap;
   }
 
   /** Save the current state to undo and return the snapshot to restore, or null. */
   redo(currentEncoded) {
     if (!this.redoStack.length) return null;
-    this.undoStack.push(currentEncoded);
+    const e = this.redoStack.pop();
+    this.undoStack.push({ snap: currentEncoded, label: e.label });
     if (this.undoStack.length > this.cap) this.undoStack.shift();
-    return this.redoStack.pop();
+    return e.snap;
   }
 }

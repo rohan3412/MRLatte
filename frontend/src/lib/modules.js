@@ -67,6 +67,8 @@ export function formatBytes(n) {
 
 /** Size label for a module record, preferring the server-rendered string. */
 export function moduleSize(m) {
+  // A user-supplied slot has no size (0 bytes): not "0 B".
+  if (!(Number(m?.bytes) > 0)) return "unknown size";
   return m?.bytesHuman || formatBytes(m?.bytes);
 }
 
@@ -198,10 +200,12 @@ async function apiRequest(path, { method = "GET", body, headers } = {}) {
     // cause survives to the UI — the slot validators and the archive-boundary
     // check both do. Flattening to `HTTP 400` here would throw away the only
     // part the user can act on.
+    // A refusal that comes with a sentence for people (`message`: what a
+    // module needs first, what still needs it) says that sentence.
     const text = typeof detail === "string"
       ? detail
       : (detail && typeof detail === "object"
-        ? [detail.error, detail.reason].filter(Boolean).join(" — ")
+        ? detail.message || [detail.error, detail.reason].filter(Boolean).join(" — ")
         : "");
     return {
       ok: false,
@@ -247,6 +251,46 @@ export function installModule(id, { repair = false } = {}) {
 /** Poll a running install/verify job. */
 export function moduleJobStatus(jobId) {
   return apiRequest(`/api/modules/jobs/${enc(jobId)}`);
+}
+
+/** Resolve once a job is done (normalised, see normalizeJob), for steps that
+ *  must happen one after another: "Install both" installs what a module needs
+ *  before the module. A backend that stops answering ends it with an error
+ *  after `maxFailures` tries in a row rather than waiting for ever. */
+export async function waitForModuleJob(jobId, { intervalMs = 700, maxFailures = 10 } = {}) {
+  let failures = 0;
+  for (;;) {
+    const res = await moduleJobStatus(jobId);
+    if (res.ok) {
+      failures = 0;
+      const job = normalizeJob(res.data);
+      if (job.done) return job;
+    } else if (++failures >= maxFailures) {
+      return { ...normalizeJob({}), done: true, error: res.error || "the backend stopped answering" };
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+/** What to install for a feature backed by `candidates` (useModulesFor):
+ *  each candidate that isn't installed, and for one that is, the modules it
+ *  still needs (`requires`). Tract dissection with dipy installed but SciPy not
+ *  points at SciPy, not at the installed dipy. Each module once, in order. */
+export function toInstallFor(candidates, all) {
+  const byId = new Map((all || []).map((x) => [x.id, x]));
+  const out = new Map();
+  for (const c of candidates || []) {
+    if (!c.installed) out.set(c.id, c);
+    else for (const id of c.missingRequires || []) if (byId.has(id)) out.set(id, byId.get(id));
+  }
+  return [...out.values()];
+}
+
+/** The modules `m` needs installed first (its `missingRequires`, already in
+ *  install order from the backend), as module objects from `all`. */
+export function requiredFirst(m, all) {
+  const byId = new Map((all || []).map((x) => [x.id, x]));
+  return (m?.missingRequires || []).map((id) => byId.get(id)).filter(Boolean);
 }
 
 /** Ask the backend to stop the module's running job. `jobId` is a query

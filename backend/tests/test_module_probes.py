@@ -48,18 +48,26 @@ def _nifti_bytes(data):
 @pytest.mark.skipif(not deps.package_present("SimpleITK"), reason="SimpleITK not installed")
 def test_a_comparison_runs_in_a_worker_and_leaves_simpleitk_unloaded():
     loaded_before = "SimpleITK" in sys.modules
-    base = np.zeros((12, 12, 12))
-    base[3:9, 3:9, 3:9] = 100.0
-    follow = base.copy()
-    follow[3:6, 3:9, 3:9] = 0.0                          # half the block is gone
+    # Unchanged "anatomy" for the registration to lock onto (the follow-up is
+    # always registered, also on the same grid), plus a block that is gone at
+    # follow-up: rigid registration must leave that real change in place.
+    z, y, x = np.mgrid[0:32, 0:32, 0:32].astype(np.float32)
+    anatomy = np.exp(-((x - 16) ** 2 + (y - 16) ** 2 + (z - 16) ** 2) / 80.0) * 80
+    anatomy += np.exp(-((x - 10) ** 2 + (y - 20) ** 2 + (z - 12) ** 2) / 15.0) * 50
+    base = anatomy.copy()
+    base[20:24, 20:24, 20:24] += 100.0
+    follow = anatomy.copy()                               # the block is gone
     r = TestClient(app).post("/api/longitudinal/register", files={
         "baseline": ("baseline.nii.gz", _nifti_bytes(base)),
         "followup": ("followup.nii.gz", _nifti_bytes(follow))})
     assert r.status_code == 200, r.text
     assert r.headers["X-Same-Grid"] == "True"
-    assert float(r.headers["X-Changed-Voxel-Pct"]) == 50.0
     diff = nib.Nifti1Image.from_bytes(gzip.decompress(r.content)).get_fdata()
-    assert diff.min() == -100.0 and diff.max() == 0.0
+    # nibabel's (x, y, z) order: the vanished block reads about -100 …
+    assert diff[20:24, 20:24, 20:24].mean() < -80
+    # … and the unchanged anatomy stays close to 0 elsewhere.
+    outside = np.ones(diff.shape, bool); outside[19:25, 19:25, 19:25] = False
+    assert np.abs(diff[outside]).max() < 15
     if not loaded_before:
         assert "SimpleITK" not in sys.modules            # the server never loaded it
     assert "SimpleITK" not in deps.packages_in_use()     # and the job is over

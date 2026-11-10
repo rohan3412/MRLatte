@@ -1,4 +1,4 @@
-import { rleEncode, rleDecode, hasAnyNonZero, sameBytes } from "./drawHistory";
+import { rleEncode, rleDecode, hasAnyNonZero, sameBytes, DrawHistory } from "./drawHistory";
 
 // The plain one-byte-at-a-time encoder the fast one must match exactly.
 function referenceEncode(arr) {
@@ -70,5 +70,37 @@ describe("bitmap checks", () => {
     expect(sameBytes(a, b)).toBe(false);
     expect(sameBytes(a.subarray(1, 101), a.slice(1, 101))).toBe(true);
     expect(sameBytes(a, a.subarray(0, 10))).toBe(false);
+  });
+});
+
+describe("undo/redo names", () => {
+  test("Undo and Redo report the edit they would act on", () => {
+    const h = new DrawHistory();
+    expect(h.undoLabel).toBeNull();
+    h.push("s0", "Pen stroke");
+    h.push("s1", "Dilate");
+    expect(h.undoLabel).toBe("Dilate");
+    expect(h.undo("s2")).toBe("s1");
+    expect(h.undoLabel).toBe("Pen stroke");
+    expect(h.redoLabel).toBe("Dilate");
+    expect(h.redo("s1")).toBe("s2");
+    expect(h.undoLabel).toBe("Dilate");
+    expect(h.redoLabel).toBeNull();
+  });
+
+  test("a new edit drops the redo branch and its names", () => {
+    const h = new DrawHistory();
+    h.push("s0", "Pen stroke");
+    h.undo("s1");
+    h.push("s0", "Erase");
+    expect(h.canRedo).toBe(false);
+    expect(h.redoLabel).toBeNull();
+    expect(h.undoLabel).toBe("Erase");
+  });
+
+  test("an unnamed edit is called Edit", () => {
+    const h = new DrawHistory();
+    h.push("s0");
+    expect(h.undoLabel).toBe("Edit");
   });
 });

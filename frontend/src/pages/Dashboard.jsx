@@ -4,10 +4,10 @@ import {
   Eye, Layers, FlaskConical, PencilRuler, Database, Plus, Image as ImageIcon, Waypoints, Trash2,
   RotateCcw, Columns3, Ruler, Save, FolderOpen,
   GitCompareArrows, GitBranch, Loader2, AlertCircle, X, Target, Network, Download,
-  PanelLeftClose, PanelLeftOpen, PanelTopClose, PanelTopOpen, Sun, Moon,
-  Square, Minimize2, Contrast, Move, Keyboard, ZoomIn, FileCode,
+  PanelLeftClose, PanelLeftOpen, PanelTopClose, PanelTopOpen,
+  Minimize2, Contrast, Move, Keyboard, ZoomIn, FileCode,
   ChevronsDownUp, ChevronsUpDown, ChevronDown, Package, Pin, Pencil, GalleryHorizontal, Minus, AlertTriangle,
-  MoreHorizontal,
+  MoreHorizontal, SlidersHorizontal, Sun, Moon, Search, Maximize2, Settings, ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import NiivueViewer from "@/components/NiivueViewer";
 import { TransformPivotContext } from "@/components/OverlayTransformControls";
@@ -17,7 +17,10 @@ import { SaveWorkspaceDialog } from "@/components/SaveWorkspaceDialog";
 import { NVImage } from "@niivue/niivue";
 import GotoMniInput from "@/components/GotoMniInput";
 import SplashScreen from "@/components/SplashScreen";
-import copheLogo from "@/assets/cophe-logo.jpg";
+// The COPHE cup at icon size (96 px, ~3 KB): small enough that the build
+// inlines it, so it is on screen with the first paint and can't fail to load.
+// The full drawing (cophe-logo.jpg, 1558 px) stays for the loading screens.
+import copheLogo from "@/assets/cophe-mark-96.jpg";
 import LayerControl from "@/components/LayerControl";
 import LayerControlAdvanced from "@/components/LayerControlAdvanced";
 import ColorBarStack from "@/components/ColorBarStack";
@@ -28,6 +31,24 @@ import { SidebarSection, SidebarGroup, SidebarSectionsContext, useSidebarSection
 import { CrosshairInfo } from "@/components/CrosshairInfo";
 import { DrawingPanel } from "@/components/DrawingPanel";
 import { LesionQcDialog } from "@/components/LesionQcDialog";
+import { PreferencesDialog } from "@/components/PreferencesDialog";
+import { FirstRun } from "@/components/FirstRun";
+import { HomeScreen } from "@/components/HomeScreen";
+import { CommandPalette } from "@/components/CommandPalette";
+import { AppTitleBar } from "@/components/AppTitleBar";
+import { Movable, DockProvider, DockArea, DockLane } from "@/components/Movable";
+import { insideGrid, publishCrosshairValues, valuesByLayer } from "@/lib/crosshairValues";
+import { BesideReadout } from "@/components/BesideReadout";
+import { TracingTools, AnalysingTools, ToolModeButton } from "@/components/TaskTools";
+import { suggestedTask, resolveToolMode, nextChoice } from "@/lib/taskToolbar";
+import { SECTIONS, SECTION_IDS } from "@/lib/sections";
+import { allPresets, applyPreset } from "@/lib/presets";
+import { InspectorContext } from "@/lib/inspector";
+import { getPref, usePreference, writePref, HEADER_BUTTON_IDS } from "@/lib/preferences";
+import { markFresh } from "@/lib/viewer/effects";
+import { useShortcutHints } from "@/hooks/useShortcutHints";
+import { useWindowLook } from "@/hooks/useWindowLook";
+import { showScreenshotToast } from "@/components/ScreenshotToast";
 import { NiftiHeaderDialog, NiftiHeaderContext } from "@/components/NiftiHeaderDialog";
 import { useLesionQcIdle } from "@/hooks/useLesionQcIdle";
 import { useClickOutside } from "@/hooks/use-click-outside";
@@ -46,6 +67,7 @@ const DaLnMapperPanel      = lazyWithRetry(() => import("@/components/DaLnMapper
 import { Slider } from "@/components/ui/slider";
 import { EditableNumber } from "@/components/ui/editable-number";
 import { ContextMenu, useContextMenu } from "@/components/ui/context-menu";
+import { WindowDragHud } from "@/components/WindowDragHud";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
@@ -58,6 +80,8 @@ import {
 import { useAtlases, useAtlasRegions, useResolveAtlas } from "@/hooks/use-atlases";
 import { patchAtlas, regionMask } from "@/lib/atlasApi";
 import { toNameMap } from "@/lib/atlasLabels";
+import { createRightClickGate } from "@/lib/rightClickGate";
+import { niftiFileFor } from "@/lib/mif";
 // Cortical (Benson) + white-matter (template) layers share the same
 // toggle/load/colorbar plumbing. The WM .nii.gz files are produced offline and
 // may be absent — toggling one surfaces a "failed to load" toast (graceful), and
@@ -72,6 +96,7 @@ const ALL_RETINOTOPY_LAYERS = [
 const wrapTurn = (deg) => (((deg + 180) % 360) + 360) % 360 - 180;
 import { VISFATLAS_NAV_MM } from "@/lib/visfAtlasColormap";
 import { lockedColorRange, robustRange } from "@/lib/volumeAnalysis";
+import { captureLayerStyle, rangesToReapply } from "@/lib/editCarryOver";
 import { measurementsToMarkers } from "@/lib/measure";
 import { tractResultUrl } from "@/lib/tractDissection";
 import {
@@ -81,7 +106,7 @@ import {
 } from "@/lib/retinotopyAnalysis";
 import { VisualFieldMap2D, visualFieldMap2DToDataURL, visualFieldMap2DDataURL } from "@/components/VisualFieldMap2D";
 import { dicomSeriesDownloadUrl } from "@/lib/dicom";
-import { normalizeTransform, isIdentityTransform } from "@/lib/overlayTransform";
+import { normalizeTransform, isIdentityTransform, IDENTITY_TRANSFORM } from "@/lib/overlayTransform";
 import { fileWithAffine } from "@/lib/overlayBake";
 import { baseIsMniTemplateGrid } from "@/lib/mniGrid";
 import { applyQcFix } from "@/lib/lesionQc";
@@ -102,6 +127,7 @@ import { TractographySection } from "@/pages/sections/TractographySection";
 import { RetinotopySection } from "@/pages/sections/RetinotopySection";
 import { BaseVolumeSection } from "@/pages/sections/BaseVolumeSection";
 import { LesionMasksSection } from "@/pages/sections/LesionMasksSection";
+import { ReportSection } from "@/pages/sections/ReportSection";
 import { AtlasesSection } from "@/pages/sections/AtlasesSection";
 import { ActivationMapsSection } from "@/pages/sections/ActivationMapsSection";
 import { ModuleGate } from "@/components/ModuleGate";
@@ -113,7 +139,7 @@ import { useModules } from "@/hooks/use-modules";
 // it shortens to in a narrow viewer (none = icon only).
 const SLICE_MODES = [
   { id: "multiplanar", label: "Multiplanar + 3D", short: "MPR + 3D", icon: LayoutGrid, showIcon: true },
-  { id: "render", label: "3D Render", short: "3D", icon: Box, showIcon: true },
+  { id: "render", label: "3D render", short: "3D", icon: Box, showIcon: true },
   { id: "axial", label: "Axial", short: "Axial", tiny: "Ax", icon: Activity },
   { id: "coronal", label: "Coronal", short: "Coronal", tiny: "Cor", icon: Activity },
   { id: "sagittal", label: "Sagittal", short: "Sagittal", tiny: "Sag", icon: Activity },
@@ -183,23 +209,32 @@ const RAIL_PEEK_WIDTH = 300;
 const NARROW_VIEWPORT_PX = 760;
 
 // Sidebar resize: 400px is the original fixed width, kept as the default.
-// MIN keeps every sidebar control (icon row, the tractography 2-col grid)
-// legible; MAX guarantees the main viewer keeps a usable strip even at the
-// app's enforced minimum window size (880x560 in electron.js) — 880 - 480 -
-// 6px handle leaves ~394px for the viewer.
+// MIN is the narrowest the sidebar's controls still fit (inbox 2 Nov asked
+// for a much smaller minimum; it was 260). MAX bounds how much of a wide
+// window it can take; at the window's 560px minimum (electron.js) a wide
+// sidebar leaves the viewer narrow, which the user can drag back.
 const DEFAULT_SIDEBAR_WIDTH = 400;
-const MIN_SIDEBAR_WIDTH = 260;
+const MIN_SIDEBAR_WIDTH = 220;
 const MAX_SIDEBAR_WIDTH = 480;
 const SIDEBAR_WIDTH_STORAGE_KEY = "mrlatte-sidebar-width";
 const clampSidebarWidth = (w) => Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, w));
 
 export default function Dashboard() {
-  const { theme, toggleTheme, setTheme, appearance, setAppearance } = useTheme();
+  const { theme, setTheme, appearance, setAppearance } = useTheme();
   // Module store entry point. `ok !== true` means the backend never answered —
   // the "modules absent" dot must NOT light up in that case (see ModuleGate).
   const {
     openStore, modules: manifestModules, ok: modulesOk, loading: modulesLoading, capabilities: moduleCaps,
+    installing: modulesInstalling,
   } = useModules();
+  // While a module installs, the store icon (sidebar header and collapsed
+  // rail) carries a turning ring (inbox 29 Oct). Static under reduced motion.
+  const installingTitle = modulesInstalling > 0
+    ? ` · installing ${modulesInstalling} module${modulesInstalling === 1 ? "" : "s"}…` : "";
+  const installingRing = modulesInstalling > 0 && (
+    <span aria-hidden="true" data-testid="module-store-installing"
+      className="pointer-events-none absolute inset-0.5 rounded-full border-2 border-crema-line border-t-crema motion-safe:animate-spin" />
+  );
   // The MNI152 template is a module like any other and can be removed.
   const templateMissing = modulesOk === true && moduleCaps?.template === false;
   const modulesAbsent = modulesOk === true
@@ -348,6 +383,10 @@ export default function Dashboard() {
   const [lesionSectionOpen, setLesionSectionOpen] = useState(false);
   const [drawingSectionOpen, setDrawingSectionOpen] = useState(false);
   const [tractDissectSectionOpen, setTractDissectSectionOpen] = useState(false);
+  // Report section (inbox 2 Nov) and the lesion it is set to. A lesion card's
+  // Report button opens it with that lesion chosen (openReportFor).
+  const [reportSectionOpen, setReportSectionOpen] = useState(false);
+  const [reportLesionId, setReportLesionId] = useState("");
   const [tractSectionOpen, setTractSectionOpen] = useState(false);
   const [tractAutoExpandId, setTractAutoExpandId] = useState(null);
   const [lnmSectionOpen, setLnmSectionOpen] = useState(false);
@@ -394,6 +433,16 @@ export default function Dashboard() {
   // The user's own expand / collapse: they write the preference, and an expand
   // also overrides the automatic narrow-window rail.
   const expandSidebar = () => { setSidebarCollapsed(false); setNarrowExpanded(true); setRailPeek(null); setSidebarAnimates(true); };
+  // A lesion card's Report button: choose the lesion, open the Report section
+  // and bring it into view (expanding the sidebar first if it was folded).
+  const openReportFor = (lesionId) => {
+    setReportLesionId(lesionId);
+    setReportSectionOpen(true);
+    if (effectiveSidebarCollapsed) expandSidebar();
+    setTimeout(() => {
+      document.querySelector('[data-testid="section-report"]')?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 180);
+  };
   const collapseSidebar = () => { setSidebarCollapsed(true); setNarrowExpanded(false); setSidebarAnimates(true); };
   useEffect(() => {
     if (!peeking) return undefined;
@@ -402,21 +451,83 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", onKey);
   }, [peeking]);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  useEffect(() => {
+    if (!showShortcuts) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setShowShortcuts(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showShortcuts]);
+  const [showPreferences, setShowPreferences] = useState(false);
+  // Ctrl+K / Cmd+K: the command palette.
+  const [showPalette, setShowPalette] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // The home screen (a plain start): gone once dismissed or any scan loads.
+  const [homeDismissed, setHomeDismissed] = useState(false);
+  const dismissHome = useCallback(() => setHomeDismissed(true), []);
+  // One screenshot path for the S key, the toolbar button and the menu: flash,
+  // save, then the corner thumbnail. Through a ref, so the keymap registered
+  // at mount always calls the current one.
+  const takeScreenshotRef = useRef(null);
+  takeScreenshotRef.current = () => {
+    viewerRef.current?.fxFlash?.();
+    viewerRef.current?.saveScreenshot({ caption: baseLabelRef.current, onSaved: showScreenshotToast });
+  };
+  // Preferences ▸ Transparency / Performance mode, applied to the window.
+  useWindowLook();
+  // Preferences ▸ Sidebar: a custom section order drops the group headings
+  // (they no longer describe it) and the rail's group breaks.
+  const customOrder = usePreference("sectionOrder")[0].length > 0;
+  // The inspector panel: the selected layer's full card, on the right.
+  const [inspectorOn] = usePreference("inspectorPanel");
+  const [inspected, setInspected] = useState(null);
+  const [inspectorEl, setInspectorEl] = useState(null);
+  const inspectorCtx = useMemo(() => ({
+    enabled: inspectorOn, selectedId: inspected, select: setInspected, target: inspectorEl,
+  }), [inspectorOn, inspected, inspectorEl]);
+  // Preferences > Sidebar > Panels / Viewer > Readout. The task toolbar's
+  // chosen set, the set a canvas interaction brought up, the drawing panel's
+  // state for the Tracing set, and the dock slots movable panels portal into.
+  const [taskToolbar] = usePreference("taskToolbar");
+  const [readoutMode] = usePreference("readout");
+  const [headerButtons] = usePreference("headerButtons");
+  const [toolChosen, setToolChosen] = useState("viewing");
+  const [toolAuto, setToolAuto] = useState(null);
+  const [taskState, setTaskState] = useState(null);
+  // The toolbar docked left or right: a strip of icons, or wider with names.
+  const [toolbarExpanded, setToolbarExpanded] = usePreference("toolbarExpanded");
+  // Holding Ctrl shows each button's single-key shortcut (the keymap below).
+  useShortcutHints({
+    '[data-testid="slice-mode-axial"]': "1", '[data-testid="slice-mode-coronal"]': "2",
+    '[data-testid="slice-mode-sagittal"]': "3", '[data-testid="crosshair-toggle"]': "C",
+    '[data-testid="focus-mode-toggle"]': "F", '[data-testid="screenshot-button"]': "S",
+    '[data-testid="drag-mode-toggle"]': "W", '[data-testid="section-drawing-toggle"]': "D",
+    '[data-testid="rail-section-drawing"]': "D", '[data-testid="shortcuts-help-toggle"]': "?",
+  });
   // Viewer view state (pushed to NiiVue via effects below; persisted to workspace).
-  const [radiological, setRadiological] = useState(true);
+  // Start-up values from Preferences (lib/preferences.js); the toolbar changes them for the session.
+  const [radiological, setRadiological] = useState(() => getPref("startRadiological"));
   // Sagittal tiles: nose to the right (default) or to the left.
   const [sagittalNoseLeft, setSagittalNoseLeft] = useState(false);
   // Viewer background: black (default, for reading scans) or white (for
   // figures and screenshots). Independent of the app's light/dark theme.
-  const [whiteBackground, setWhiteBackground] = useState(false);
+  const [whiteBackground, setWhiteBackground] = useState(() => getPref("startWhiteBackground"));
   const [orientationLabels, setOrientationLabels] = useState(true);
-  // Right-drag mode toggle: "zoom" (default) | "windowing" | "pan". Left-click
+  // Right-drag mode toggle: "windowing" (default) | "zoom" | "pan". Left-click
   // is ALWAYS crosshair (when not drawing) and isn't controlled by this state
   // anymore — see NiivueViewer's setDragMode, which now configures the RIGHT
   // mouse button only. (Kept the variable name "dragMode" for continuity with
   // the workspace-save format and existing call sites — only its target
   // button and default value changed.)
-  const [dragMode, setDragMode] = useState("zoom"); // zoom | windowing | pan
+  const [dragMode, setDragMode] = useState("windowing"); // windowing | zoom | pan
   // Measurements (distance/angle list) + midline landmark. Owned here so they
   // survive the Measurements section collapsing and can be persisted.
   const [measurements, setMeasurements] = useState([]);
@@ -435,7 +546,11 @@ export default function Dashboard() {
   // (even re-editing the same name) so DrawingPanel's effect re-fires.
   const [editingSaveName, setEditingSaveName] = useState("");
   const [editNonce, setEditNonce] = useState(0);
-  const [sliceType, setSliceType] = useState("multiplanar");
+  // The edited layer's look (colour map, opacity, ranges), applied by the next
+  // Draw mask save so the saved layer looks like the one edited (inbox 29 Oct).
+  // Consumed by that save; dropped by Clear all.
+  const editingStyleRef = useRef(null);
+  const [sliceType, setSliceType] = useState(() => getPref("startLayout"));
   // Drawing tool state — lifted here from DrawingPanel so Dashboard can show
   // the 4th erase button in the topbar and pass the canvas label to NiivueViewer.
   const [drawingActive, setDrawingActive] = useState(false);
@@ -445,9 +560,9 @@ export default function Dashboard() {
   // views — see the sliceType effect below). The user can also override it
   // manually via DrawingPanel's 2D/3D toggle.
   const [brushMode, setBrushMode] = useState("2D");
-  const [crosshair, setCrosshair] = useState(true);
-  const [crosshairWidth, setCrosshairWidth] = useState(1);
-  const [crosshairColor, setCrosshairColor] = useState("white");
+  const [crosshair, setCrosshair] = useState(() => getPref("startCrosshair"));
+  const [crosshairWidth, setCrosshairWidth] = useState(() => getPref("crosshairWidth"));
+  const [crosshairColor, setCrosshairColor] = useState(() => getPref("crosshairColor"));
   const [showCrosshairSettings, setShowCrosshairSettings] = useState(false);
   const [showClipSettings, setShowClipSettings] = useState(false);
   const crosshairSettingsRef = useRef(null);
@@ -503,6 +618,17 @@ export default function Dashboard() {
   // null for the bundled MNI152 template and in the browser build, where no
   // real filesystem path is obtainable from a File object.
   const [baseFullPath, setBaseFullPath] = useState(null);
+  // Recent scans (home screen): a base with a path on disk is recorded, with
+  // a small picture of it, once it has drawn. Loading one also ends the home screen.
+  useEffect(() => {
+    if (!baseFullPath) return undefined;
+    setHomeDismissed(true);
+    if (!window.mrlatte?.addRecent) return undefined;
+    const t = setTimeout(() => {
+      window.mrlatte.addRecent(baseFullPath, baseFullPath.split(/[\\/]/).pop(), viewerRef.current?.getThumbnail?.());
+    }, 900);
+    return () => clearTimeout(t);
+  }, [baseFullPath]);
   // Lesion QC (idea-inbox request): mni=true only for the default MNI152
   // template — a replaced base (custom upload, DICOM) is native-space, where
   // lqtpy's brain-mask checks would false-alarm on every drawing. Mirrors
@@ -552,7 +678,7 @@ export default function Dashboard() {
   // DICOM import: series picker + staged progress (upload → convert → load).
   const [dicomJob, setDicomJob] = useState(null);       // { jobId, series }
   const [loadedSeriesId, setLoadedSeriesId] = useState(null); // highlights the loaded series row
-  const [dicomProgress, setDicomProgress] = useState(null); // { stage, fraction }
+  const [dicomProgress, setDicomProgress] = useState(null); // { stage, loaded, total, files, since }: lib/dicomProgress.js
   const [dicomDownload, setDicomDownload] = useState(null); // { jobId, seriesId, name } of the loaded series
   const [baseOpacity, setBaseOpacity] = useState(1.0);
   const [baseColormap, setBaseColormap] = useState("gray");
@@ -672,11 +798,22 @@ export default function Dashboard() {
   // that raw id instead of the layer's real name; this maps it back. A ref, not
   // a dep, because handleLocationChange is a hot niivue callback (CLAUDE.md §6).
   const layerNamesRef = useRef({});
+  // {volumeId: shown} for the same layers: their eye, not the live opacity,
+  // which is 0 for a moment while a new layer fades in.
+  const layerShownRef = useRef({});
   useEffect(() => {
     const m = {};
-    for (const l of userLayers) m[l.id] = l.name;
+    const shown = {};
+    for (const l of userLayers) { m[l.id] = l.name; shown[l.id] = l.visible !== false; }
     layerNamesRef.current = m;
+    layerShownRef.current = shown;
   }, [userLayers]);
+  // A layer added, removed, renamed or shown/hidden: refresh the readout's
+  // value rows now rather than at the next crosshair move.
+  const layerRowsKey = userLayers.map((l) => `${l.id}|${l.name}|${l.visible !== false}`).join(";");
+  useEffect(() => {
+    try { viewerRef.current?.getNiivue()?.createOnLocationChange(); } catch (_e) { /* no viewer yet */ }
+  }, [layerRowsKey]);
   // Free-text notes (item 13), keyed by whatever id the layer/card uses —
   // one flat map shared by every section (base volume's "mni152", standard
   // atlas ids, retinotopy layer ids, and every user-uploaded layer/tract id)
@@ -771,8 +908,16 @@ export default function Dashboard() {
       return resolveAtlas(rawName)?.id || rawName;
     };
     const labels = {};
-    const values = data.values || [];
+    const nv = viewerRef.current?.getNiivue();
+    // A layer smaller than the base has no value where the crosshair is
+    // outside it (NiiVue would report its nearest edge voxel instead).
+    const dimsByName = {};
+    if (nv?.volumes) for (const vol of nv.volumes) dimsByName[vol.name] = vol.dimsRAS;
+    const values = (data.values || []).filter((v) => insideGrid(v.vox, dimsByName[v.name]));
     const valueRows = [];
+    // The sliders' crosshair markers read this straight away (not through the
+    // debounce below): they move their own element once per frame.
+    publishCrosshairValues(valuesByLayer(values, canon));
 
     // Item 19: the value bar showed a row for EVERY loaded volume, including
     // the retinotopy helper maps (benson/wm polar-angle + eccentricity) that
@@ -780,7 +925,6 @@ export default function Dashboard() {
     // appeared as PolarAng0 / Eccen0 / wm_… noise. Skip any volume that is not
     // actually visible (opacity 0), keyed by the live niivue opacity so the
     // rule is uniform across user layers, atlases and retinotopy.
-    const nv = viewerRef.current?.getNiivue();
     const opacityByName = {};
     if (nv?.volumes) for (const vol of nv.volumes) opacityByName[vol.name] = vol.opacity;
 
@@ -794,6 +938,7 @@ export default function Dashboard() {
       wm_eccentricity: "WM Eccen",
     };
     const readoutName = (rawName, canonName) => {
+      if (rawName === "base_custom") return "Base"; // a custom base image, not the template
       const ln = layerNamesRef.current[rawName] || layerNamesRef.current[canonName];
       if (ln) return ln;
       const atlas = resolveAtlas(canonName);
@@ -816,7 +961,7 @@ export default function Dashboard() {
       // Hidden-label helpers (suffix "__labels") and opacity-0 helpers are
       // skipped; the base volume (opacity undefined here only if unset) stays.
       const opacity = opacityByName[v.name];
-      const visible = opacity === undefined || opacity > 0;
+      const visible = layerShownRef.current[v.name] ?? (opacity === undefined || opacity > 0);
       if (typeof v.value === "number" && visible && !String(name || "").endsWith("__labels")) {
         valueRows.push({ name: readoutName(v.name, name), value: v.value });
       }
@@ -1008,6 +1153,11 @@ export default function Dashboard() {
   const addUserFile = async (file, type, opts = {}) => {
     const viewer = viewerRef.current;
     if (!viewer) return null;
+    // A .mif is turned into a NIfTI first, so the analyses can read it too.
+    try { file = await niftiFileFor(file); } catch (e) {
+      toast.error("Could not read this MRtrix image", { description: `${file?.name}: ${e?.message || e}` });
+      return null;
+    }
     const id = `${type}-${Date.now()}`;
     // Palette cycling (item 96) — cmapCursor is a ref incremented synchronously
     // here (not derived from userLayers.length) so a multi-file upload loop
@@ -1039,8 +1189,15 @@ export default function Dashboard() {
     // IS that file (an in-app edit replaces it and must be embedded instead).
     const diskPath = opts.fullPath || window.mrlatte?.getPathForFile?.(file) || null;
     userFileCache.current[id] = { file, colormap: cm, loaded: file, diskPath };
-    // Activation maps omit the type prefix — the section header already says "Activation Maps"
-    const layerName = type === "activation" ? file.name : `${typeLabel(type)} · ${file.name}`;
+    // A layer the user adds blooms in and its card glows once; one Undo puts
+    // back glows without the bloom; opening a workspace does neither.
+    if (!opts.noEffect) {
+      markFresh(id);
+      if (!opts.quiet) viewer.fxBloom?.();
+    }
+    // Layers are named by their file: the section they sit in says what they
+    // are (lists that mix kinds add a "(lesion)" suffix themselves).
+    const layerName = file.name;
     setUserLayers((p) => [
       ...p,
       { id, name: opts.name || layerName, type, visible: true, opacity, colormap: cm,
@@ -1202,6 +1359,7 @@ export default function Dashboard() {
     viewerRef.current?.drawClear?.();
     const ok = await viewerRef.current?.loadDrawingFromVolume?.(cached.file);
     if (!ok) return;
+    editingStyleRef.current = captureLayerStyle(layer, overlayMeta[id]);
     // Fully unload the source layer rather than just hiding it (item 5): Save
     // always creates a NEW layer, so leaving the original around — even
     // invisible — meant editing then saving left both the old and new file.
@@ -1216,7 +1374,7 @@ export default function Dashboard() {
     setLesionSectionOpen(false);
     setDrawingSectionOpen(true);
     viewerRef.current?.setDrawingEnabled?.(true);
-    toast.success("Loaded into Draw Mask — edit it there");
+    toast.success("Loaded into Draw mask — edit it there");
   };
 
   // Clone a saved mask as a brand-new layer, named "Copy of {original}" (item
@@ -1435,6 +1593,7 @@ export default function Dashboard() {
     handleBaseUpload, baseLoading, markBaseLoadedExternally, handleDicomImport, loadDicomSeries, handleResetBase, baseDicom,
     handleBaseVisibilityToggle, handleBaseOpacity, handleBaseColormap,
     handleBaseCalRange, handleBaseColorbarToggle, refreshBaseOverlayMeta,
+    baseTransform, handleBaseTransform,
   } = useBaseVolume({
     viewerRef, baseVisible, setBaseLabel, setBaseVisible, setBaseOpacity,
     setBaseColormap, setBaseColorbarOn, setBaseOverlayMeta, setDicomJob,
@@ -1523,7 +1682,7 @@ export default function Dashboard() {
   // applyWorkspace is declared further down; the quick-open hook reaches it
   // through this ref (assigned right after its declaration).
   const applyWorkspaceRef = useRef(null);
-  const { initialBaseVolume, openDroppedFiles } = useQuickOpenFile({
+  const { initialBaseVolume, openDroppedFiles, launchedPlain } = useQuickOpenFile({
     applyWorkspace: (ws) => applyWorkspaceRef.current?.(ws),
     rememberBaseFile: (file) => viewerRef.current?.rememberBaseFile?.(file),
     viewerReady, handleBaseUpload, markBaseLoadedExternally, addUserFile, removeUserLayer: removeUserLayerNow,
@@ -1580,11 +1739,14 @@ export default function Dashboard() {
     cmapCursor.current = { lesion: 0, activation: 0, roi: 0 };
     setCrosshairLabels({});
     setCrosshairValues([]);
+    publishCrosshairValues({});
     setSelectedLesionIds(new Set());
     setLayerLabelAtlas({});
     setLesionPickerOpen(false);
     setMeasurements([]);
     setLandmark(null);
+    editingStyleRef.current = null;
+    setInspected(null); // its layer is gone; don't leave the panel on "That layer is gone"
     setClearNonce((n) => n + 1);
     // No toast here: applyWorkspace calls this too. The user-facing Clear all
     // (confirmClearAll) says what happened, with its Undo.
@@ -1646,6 +1808,7 @@ export default function Dashboard() {
       } catch (_e) { drawing = null; }
     }
     const adjusted = userLayers.some((l) => l.transform && !isIdentityTransform(l.transform));
+    const baseAdjusted = !!(baseTransform && !isIdentityTransform(baseTransform));
     return {
       ...(memory && { memory }),   // marks an undo snapshot for applyWorkspace
       base,
@@ -1659,7 +1822,8 @@ export default function Dashboard() {
       // refuse such a file. Files with no adjustment stay v4 and keep opening
       // everywhere.
       // v6: a base, or any file saved as a link — older versions would drop those silently.
-      version: base || Object.values(files).some((f) => f.path) ? 6 : adjusted ? 5 : 4,
+      // v7: the base moved by hand (view.baseTransform).
+      version: baseAdjusted ? 7 : base || Object.values(files).some((f) => f.path) ? 6 : adjusted ? 5 : 4,
       savedAt: new Date().toISOString(),
       label: baseLabel,
       view: {
@@ -1667,6 +1831,9 @@ export default function Dashboard() {
         baseVisible, baseOpacity, baseColormap, baseColormapInvert, baseColorbarOn,
         // Base intensity window + view chrome (v3).
         baseCalMin: baseOverlayMeta.cal_min, baseCalMax: baseOverlayMeta.cal_max,
+        // The base's hand adjustment (move / turn / size), applied to the
+        // base file as saved; absent when it wasn't moved.
+        ...(baseTransform && { baseTransform }),
         sidebarCollapsed, topbarCollapsed, dragMode, radiological, sagittalNoseLeft, whiteBackground, orientationLabels, theme,
         activeOrientation,
         // Global tract
@@ -1699,7 +1866,7 @@ export default function Dashboard() {
       asymmetric, largeSlice, baseVisible, baseOpacity, baseColormap, baseColormapInvert, baseColorbarOn, baseOverlayMeta,
       sidebarCollapsed, topbarCollapsed, dragMode, radiological, sagittalNoseLeft, whiteBackground, orientationLabels, theme, activeOrientation,
       measurements, landmark, pins, crosshairMM, retState, atlasState, layerLabelAtlas, baseLabel, tractRender,
-      layerNotes, mosaicAxis, mosaicCount, mosaicRows, mosaicGap, baseFullPath, baseDicom]);
+      layerNotes, mosaicAxis, mosaicCount, mosaicRows, mosaicGap, baseFullPath, baseDicom, baseTransform]);
 
   // A DICOM base saved as a link: convert its source again — the workspace
   // keeps where the scans are, not the converted volume. Says why it's slow.
@@ -1724,9 +1891,9 @@ export default function Dashboard() {
   };
 
   const applyWorkspace = useCallback(async (ws) => {
-    if (!ws || ![1, 2, 3, 4, 5, 6].includes(ws.version)) {
+    if (!ws || ![1, 2, 3, 4, 5, 6, 7].includes(ws.version)) {
       toast.error("Unsupported workspace file", {
-        description: ws?.version > 6 ? "It was saved by a newer MRLatte — update to open it." : undefined,
+        description: ws?.version > 7 ? "It was saved by a newer MRLatte — update to open it." : undefined,
       });
       return;
     }
@@ -1778,8 +1945,9 @@ export default function Dashboard() {
     }
     // View settings
     const v = ws.view || {};
-    setSliceType(v.sliceType ?? "multiplanar");
-    setCrosshair(v.crosshair ?? true);
+    // A workspace without its own view (older ones) opens as Preferences say.
+    setSliceType(v.sliceType ?? getPref("startLayout"));
+    setCrosshair(v.crosshair ?? getPref("startCrosshair"));
     if (v.crosshairWidth != null) setCrosshairWidth(v.crosshairWidth);
     if (v.crosshairColor) setCrosshairColor(v.crosshairColor);
     // Item 102 (6a): v.clipEnabled is new (workspaces saved after this
@@ -1811,6 +1979,9 @@ export default function Dashboard() {
     setBaseColormapInvert(!!v.baseColormapInvert);
     if (v.baseColorbarOn != null) { setBaseColorbarOn(!!v.baseColorbarOn); viewerRef.current?.setBaseColorbarVisible(!!v.baseColorbarOn); }
     if (v.baseCalMin != null && v.baseCalMax != null) handleBaseCalRange(null, v.baseCalMin, v.baseCalMax);
+    // The base's hand adjustment; none puts it back where its file has it
+    // (an undo snapshot can keep the same base with a different adjustment).
+    handleBaseTransform(null, v.baseTransform || IDENTITY_TRANSFORM);
     // View chrome (v3): missing on older files → keep current defaults.
     // An undo snapshot leaves the panels and the appearance as they are now.
     if (!ws.memory) {
@@ -1840,11 +2011,13 @@ export default function Dashboard() {
       if (!f?.b64 && !f?.path && !f?.file) continue;
       const file = await readEntry(f, `${l.type}.nii.gz`);
       if (!file) continue;
-      // An undo snapshot also keeps the layer's own name (a copy, a saved
-      // network map) and doesn't toast every layer it puts back.
+      // The layer keeps its own name (a copy, a saved network map, a
+      // longitudinal difference), not its file's; an undo snapshot also
+      // doesn't toast every layer it puts back.
       const newId = await addUserFile(file, l.type, {
-        colormap: l.colormap, opacity: l.opacity, fullPath: f.path,
-        ...(ws.memory && { name: l.name, quiet: true }),
+        colormap: l.colormap, opacity: l.opacity, fullPath: f.path, noEffect: !ws.memory,
+        ...(typeof l.name === "string" && l.name && { name: l.name }),
+        ...(ws.memory && { quiet: true }),
       });
       if (!newId) continue;
       newIds[l.id] = newId;
@@ -1965,6 +2138,22 @@ export default function Dashboard() {
     }
   };
   undoAppRef.current = undoApp;
+  // Ctrl/Cmd+Z undoes the last removal or Clear all, as the Edit menu says;
+  // while drawing, DrawingPanel's own Ctrl+Z undoes strokes instead.
+  const drawingActiveRef = useRef(drawingActive);
+  drawingActiveRef.current = drawingActive;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
+      const t = e.target;
+      if (t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || t?.isContentEditable) return;
+      if (drawingActiveRef.current) return;
+      e.preventDefault();
+      undoAppRef.current?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // A tract loaded after a snapshot would be lost by restoring it (snapshots
   // don't hold tracts), so a new tract invalidates the stack like a new layer.
   const tractCountRef = useRef(tractLayers.length);
@@ -2038,6 +2227,32 @@ export default function Dashboard() {
     setClipAz((prev) => wrapTurn(prev + dAz));
     setClipEl((prev) => wrapTurn(prev + dEl));
   }, []);
+  // Right-drag windowing of the base: the readout follows every move; the base
+  // card (its Window range and Level / Width sliders, and so workspaces) follows
+  // too, at most once per animation frame so a drag never re-renders the
+  // dashboard per pointer event, and takes the final window at the end.
+  const windowHudRef = useRef(null);
+  const windowFrameRef = useRef({ raf: 0, pending: null });
+  const flushBaseWindow = useCallback(() => {
+    const f = windowFrameRef.current;
+    f.raf = 0;
+    const w = f.pending;
+    f.pending = null;
+    if (!w) return;
+    setBaseOverlayMeta((p) => (p.cal_min === w.lo && p.cal_max === w.hi ? p : { ...p, cal_min: w.lo, cal_max: w.hi }));
+  }, []);
+  const handleWindowDrag = useCallback((info) => {
+    windowHudRef.current?.update(info);
+    const f = windowFrameRef.current;
+    f.pending = { lo: info.lo, hi: info.hi };
+    if (info.phase === "end") {
+      if (f.raf) cancelAnimationFrame(f.raf);
+      flushBaseWindow();
+    } else if (!f.raf) {
+      f.raf = requestAnimationFrame(flushBaseWindow);
+    }
+  }, [flushBaseWindow]);
+  useEffect(() => () => { if (windowFrameRef.current.raf) cancelAnimationFrame(windowFrameRef.current.raf); }, []);
 
   // ===== Side effects =====
   // Item 102 (6a): clipEnabled owns on/off; pass niivue's out-of-volume depth
@@ -2231,9 +2446,9 @@ export default function Dashboard() {
       // met (wrong view, one slice, no drawing), so there's nothing to guard here.
       i: () => viewerRef.current?.interpolateDrawnSlices?.(),
       I: () => viewerRef.current?.interpolateAllDrawnSlices?.(),
-      w: () => setDragMode((m) => (m === "zoom" ? "windowing" : m === "windowing" ? "pan" : "zoom")),
+      w: () => setDragMode((m) => (m === "windowing" ? "zoom" : m === "zoom" ? "pan" : "windowing")),
       f: () => setFocusMode((v) => !v),
-      s: () => viewerRef.current?.saveScreenshot({ caption: baseLabelRef.current }),
+      s: () => takeScreenshotRef.current(),
       "[": () => cycleSlice(-1),
       "]": () => cycleSlice(1),
       "1": () => { setAsymmetric(false); setSliceType("axial"); },
@@ -2261,7 +2476,7 @@ export default function Dashboard() {
     switch (id) {
       case "open-workspace": handleOpenWorkspace(); break;
       case "save-workspace": handleSaveWorkspace(); break;
-      case "screenshot": viewerRef.current?.saveScreenshot({ caption: baseLabel }); break;
+      case "screenshot": takeScreenshotRef.current(); break;
       // While drawing, Undo / Redo are the drawing's own; otherwise Undo is the
       // app stack (Clear all, Remove layer) and there is no app Redo.
       case "undo": if (drawingActive) viewerRef.current?.drawUndo?.(); else undoApp(); break;
@@ -2275,6 +2490,7 @@ export default function Dashboard() {
       case "appearance-light": setAppearance("light"); break;
       case "appearance-dark": setAppearance("dark"); break;
       case "shortcuts": setShowShortcuts(true); break;
+      case "preferences": setShowPreferences(true); break;
       default: break;
     }
   };
@@ -2300,14 +2516,30 @@ export default function Dashboard() {
   const ctxMenu = useContextMenu();
   // Only a right-click that didn't move opens the image's menu: a right-DRAG
   // zooms / windows / pans, and while drawing it erases, so no menu then.
-  const rightDownRef = useRef(null);
-  const openViewerMenu = (e) => {
-    const down = rightDownRef.current;
-    rightDownRef.current = null;
+  // The gate also waits for the release on macOS, where the browser asks for
+  // the menu as soon as the button goes down (lib/rightClickGate.js).
+  const rightGateRef = useRef(null);
+  if (!rightGateRef.current) rightGateRef.current = createRightClickGate();
+  const onViewerPointerDown = (e) => {
+    // Drawing on the canvas brings up the Tracing set of the task toolbar.
+    if (taskToolbar && drawingActive && e.button === 0 && e.target.tagName === "CANVAS") setToolAuto("tracing");
+    if (e.button === 2) rightGateRef.current.down(e.clientX, e.clientY);
+  };
+  const onViewerPointerUp = (e) => {
+    if (e.button !== 2 || !rightGateRef.current.up(e.clientX, e.clientY)) return;
     if (e.target.tagName !== "CANVAS" || drawingActive) return;
-    if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+    ctxMenu.open({ preventDefault() {}, clientX: e.clientX, clientY: e.clientY }, viewerMenuItems());
+  };
+  const openViewerMenu = (e) => {
+    if (e.target.tagName !== "CANVAS" || drawingActive) { rightGateRef.current.cancel(); return; }
+    const verdict = rightGateRef.current.contextmenu(e.clientX, e.clientY);
+    if (verdict === "hold") { e.preventDefault(); return; }
+    if (verdict === "skip") return;
+    ctxMenu.open(e, viewerMenuItems());
+  };
+  const viewerMenuItems = () => {
     const view = (m) => ({ label: m.label, checked: !asymmetric && sliceType === m.id, onSelect: () => menuCommandRef.current(`view-${m.id}`) });
-    ctxMenu.open(e, [
+    return [
       ...SLICE_MODES.filter((m) => m.id !== "mosaic").map(view),
       { label: "Asymmetric", checked: asymmetric, onSelect: chooseAsymmetric },
       view(SLICE_MODES.find((m) => m.id === "mosaic")),
@@ -2322,7 +2554,7 @@ export default function Dashboard() {
       { label: "Draw mask", hint: "D", onSelect: () => { setDrawingSectionOpen(true); setDrawTogglePending(true); } },
       "-",
       { label: "Clear all…", danger: true, onSelect: () => menuCommandRef.current("clear-all") },
-    ]);
+    ];
   };
   const sectionMenuItems = (s, { rail }) => [
     rail
@@ -2665,10 +2897,68 @@ export default function Dashboard() {
     return out;
   }, [userLayers, retState, overlayMeta]);
 
+  // The task toolbar (lib/taskToolbar.js): which set the bar shows now.
+  const inspectedLayer = inspectorOn && inspected ? userLayers.find((l) => l.id === inspected) || null : null;
+  const toolSuggested = suggestedTask({ drawingActive, inspectedKind: inspectedLayer?.type });
+  const toolMode = resolveToolMode({ enabled: taskToolbar, chosen: toolChosen, auto: toolAuto, suggested: toolSuggested });
+  const [toolModeWas, setToolModeWas] = useState(toolMode);
+  const [toolSweep, setToolSweep] = useState(null);
+  if (toolModeWas !== toolMode) { setToolModeWas(toolMode); setToolSweep(toolMode === "viewing" ? "top" : "bottom"); }
+  useEffect(() => { if (!drawingActive) setToolAuto(null); }, [drawingActive]);
+  const toggleToolMode = () => {
+    const next = nextChoice(toolMode, toolSuggested);
+    if (next) { setToolChosen(next.chosen); setToolAuto(next.auto); }
+  };
+
+  // Command palette (Ctrl+K): the menu's own commands, every sidebar section
+  // (a hidden one is shown again first) and the presets.
+  const paletteCommands = useMemo(() => {
+    if (!showPalette) return [];
+    const menu = (id, title, keys) => ({ id, title, group: "Command", keys, run: () => menuCommandRef.current?.(id) });
+    const leftOut = getPref("hiddenSections");
+    return [
+      ...SLICE_MODES.map((m) => menu(`view-${m.id}`, `View: ${m.label}`)),
+      menu("toggle-crosshair", "Crosshair on or off", "C"),
+      menu("toggle-focus", "Focus mode", "F"),
+      menu("screenshot", "Screenshot", "S"),
+      menu("open-workspace", "Open workspace…"),
+      menu("save-workspace", "Save workspace…"),
+      menu("undo", "Undo"),
+      menu("clear-all", "Clear all…"),
+      menu("toggle-sidebar", "Show or hide the sidebar"),
+      menu("toggle-toolbar", "Show or hide the toolbar"),
+      menu("preferences", "Preferences…"),
+      menu("shortcuts", "Keyboard shortcuts", "?"),
+      menu("appearance-light", "Light look"),
+      menu("appearance-dark", "Dark look"),
+      menu("appearance-system", "Look follows the system"),
+      { id: "module-store", title: "Module store", group: "Command", run: () => openStore(null) },
+      ...SECTIONS.map((sec) => ({
+        id: `open-${sec.id}`,
+        title: leftOut.includes(sec.id) ? `Show and open ${sec.title}` : `Open ${sec.title}`,
+        group: "Section",
+        run: () => {
+          if (leftOut.includes(sec.id)) writePref("hiddenSections", leftOut.filter((x) => x !== sec.id));
+          if (effectiveSidebarCollapsed) expandSidebar();
+          requestAnimationFrame(() => {
+            sidebarSections.find((x) => x.testId === sec.id)?.setOpen(true);
+            document.querySelector(`[data-testid="${sec.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
+        },
+      })),
+      ...allPresets().map((pr) => ({ id: `preset-${pr.id}`, title: `Use preset: ${pr.name}`, group: "Preset", run: () => applyPreset(pr) })),
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPalette]);
   return (
     <TransformPivotContext.Provider value={transformPivotCtx}>
     <ColorLockContext.Provider value={colorLockCtx}>
-    <div className="relative flex h-screen w-full overflow-hidden bg-background text-foreground" data-testid="dashboard-root">
+    <DockProvider>
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-background text-foreground" data-testid="dashboard-root">
+      {window.mrlatte?.isDesktop && !focusMode && (
+        <AppTitleBar baseName={baseLabel} onSearch={() => setShowPalette(true)} />
+      )}
+      <div className="relative flex min-h-0 w-full flex-1 overflow-hidden">
       <SplashScreen ready={viewerReady} steps={splashSteps} />
       <ContextMenu menu={ctxMenu.menu} onClose={ctxMenu.close} />
       {/* ============ SIDEBAR ============ */}
@@ -2708,80 +2998,85 @@ export default function Dashboard() {
               </button>
             </div>
           )}
-          <div className={`${peeking ? "hidden" : "flex"} h-14 flex-shrink-0 items-center gap-2.5 border-b border-border pl-4 pr-2.5`}>
-            <img src={copheLogo} alt="" className="h-7 w-7 flex-shrink-0 rounded-[7px] object-cover" />
-            {/* The version sits beside the name, kept clear of the module button
-                (pr-3); in a narrow sidebar it drops under the name instead. */}
-            <div className="flex-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 pr-2">
-              <div className="text-[15px] font-semibold tracking-[-0.01em] leading-none">MRLatte</div>
-              {/* From package.json via craco.config.js (REACT_APP_VERSION). */}
-              {process.env.REACT_APP_VERSION && (
-                <a
-                  href={`https://github.com/cogneuro-rgb/MRLatte/releases/tag/v${process.env.REACT_APP_VERSION}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-5 items-center font-mono text-[10.5px] text-subtle hover:text-foreground hover:underline leading-none whitespace-nowrap"
-                  title="MRLatte version: open this release on GitHub"
-                  data-testid="app-version"
-                >
-                  v{process.env.REACT_APP_VERSION}
-                </a>
-              )}
+          {/* The sidebar's own row (owner, 10 Nov): a slim row of buttons, which
+              ones a preference (Preferences ▸ Sidebar ▸ Header buttons). The
+              desktop app's title bar already names MRLatte (its logo's tooltip
+              gives the version), so logo, name and version show here only in
+              a browser, where there is no title bar. */}
+          <div className={`${peeking ? "hidden" : "flex"} h-10 flex-shrink-0 items-center gap-2 border-b border-border pl-3 pr-2`}
+            data-testid="sidebar-header">
+            {!window.mrlatte?.isDesktop && (
+              <>
+                <img src={copheLogo} alt="" className="h-6 w-6 flex-shrink-0 rounded-[6px] object-cover" />
+                <span className="text-[14px] font-semibold tracking-[-0.01em]">MRLatte</span>
+                {process.env.REACT_APP_VERSION && (
+                  <a href={`https://github.com/cogneuro-rgb/MRLatte/releases/tag/v${process.env.REACT_APP_VERSION}`}
+                    target="_blank" rel="noreferrer"
+                    className="font-mono text-[10.5px] text-subtle hover:text-foreground hover:underline whitespace-nowrap"
+                    title="MRLatte version: open this release on GitHub" data-testid="app-version">
+                    v{process.env.REACT_APP_VERSION}
+                  </a>
+                )}
+              </>
+            )}
+            <span className="min-w-0 flex-1" />
+            <div className="flex flex-shrink-0 items-center gap-0.5" data-testid="sidebar-header-buttons">
+              {HEADER_BUTTON_IDS.filter((id) => headerButtons.includes(id)).map((id) => {
+                if (id === "modules") return (
+                  <React.Fragment key={id}>
+        <button
+          onClick={() => openStore(null)}
+          className="icon-btn relative h-7 w-7 flex-shrink-0"
+          title={`${modulesAbsent ? "Module store — some modules are not installed" : "Module store"}${
+            totalActive > 0 ? ` · ${totalActive} layer${totalActive === 1 ? "" : "s"} active` : ""}${installingTitle}`}
+          aria-busy={modulesInstalling > 0 || undefined}
+          data-testid="module-store-open"
+        >
+          {installingRing}
+          <Package size={16} />
+          {/* Active-layer count, pinned to the icon like a notification
+              badge; the "not installed" dot moves to the bottom corner so
+              the two never overlap. */}
+          {totalActive > 0 && (
+            <span
+              className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-panel-active px-[3px] font-mono text-[10px] font-semibold leading-none text-foreground tabular-nums shadow-[0_0_0_2px_hsl(var(--panel))]"
+              data-testid="active-count"
+            >
+              {totalActive}
+            </span>
+          )}
+          {modulesAbsent && (
+            <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-warn shadow-[0_0_0_2px_hsl(var(--panel))]" />
+          )}
+        </button>
+                  </React.Fragment>
+                );
+                const b = {
+                  sections: { onClick: () => setAllSectionsOpen(openSectionCount === 0),
+                    title: openSectionCount > 0 ? "Collapse all sections" : "Expand all sections",
+                    icon: openSectionCount > 0 ? ChevronsDownUp : ChevronsUpDown, testId: "sidebar-sections-toggle" },
+                  theme: { onClick: () => setAppearance(theme === "dark" ? "light" : "dark"),
+                    title: theme === "dark" ? "Light mode" : "Dark mode", icon: theme === "dark" ? Sun : Moon, testId: "sidebar-theme-toggle" },
+                  search: { onClick: () => setShowPalette(true), title: "Search commands, sections and presets (Ctrl+K)", icon: Search, testId: "sidebar-search" },
+                  screenshot: { onClick: () => takeScreenshotRef.current(), title: "Screenshot (S)", icon: Camera, testId: "sidebar-screenshot" },
+                  focus: { onClick: () => setFocusMode((v) => !v), title: "Focus mode (F)", icon: Maximize2, testId: "sidebar-focus" },
+                  shortcuts: { onClick: () => setShowShortcuts(true), title: "Keyboard shortcuts (?)", icon: Keyboard, testId: "sidebar-shortcuts" },
+                  preferences: { onClick: () => setShowPreferences(true), title: "Preferences", icon: Settings, testId: "sidebar-preferences" },
+                  sidebar: { onClick: collapseSidebar, title: "Collapse sidebar", icon: PanelLeftClose, testId: "sidebar-collapse-toggle" },
+                }[id];
+                const Icon = b.icon;
+                return (
+                  <button key={id} type="button" onClick={b.onClick} className="icon-btn h-7 w-7 flex-shrink-0"
+                    title={b.title} aria-label={b.title} data-testid={b.testId}>
+                    <Icon size={16} />
+                  </button>
+                );
+              })}
             </div>
-            <button
-              onClick={() => openStore(null)}
-              className="icon-btn relative h-8 w-8 flex-shrink-0"
-              title={`${modulesAbsent ? "Module store — some modules are not installed" : "Module store"}${
-                totalActive > 0 ? ` · ${totalActive} layer${totalActive === 1 ? "" : "s"} active` : ""}`}
-              data-testid="module-store-open"
-            >
-              <Package size={17} />
-              {/* Active-layer count, pinned to the icon like a notification
-                  badge; the "not installed" dot moves to the bottom corner so
-                  the two never overlap. */}
-              {totalActive > 0 && (
-                <span
-                  className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-panel-active px-[3px] font-mono text-[10px] font-semibold leading-none text-foreground tabular-nums shadow-[0_0_0_2px_hsl(var(--panel))]"
-                  data-testid="active-count"
-                >
-                  {totalActive}
-                </span>
-              )}
-              {modulesAbsent && (
-                <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-warn shadow-[0_0_0_2px_hsl(var(--panel))]" />
-              )}
-            </button>
-            <button
-              onClick={toggleTheme}
-              className="icon-btn h-8 w-8 flex-shrink-0"
-              title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-              data-testid="theme-toggle"
-            >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-            {/* Item 105: one button for all sections — collapse everything if
-                ANY section is open, expand everything only once they are all
-                closed. Deliberately not a per-section memory: the point is to
-                de-clutter, and "open all" is the escape hatch back. */}
-            <button
-              onClick={() => setAllSectionsOpen(openSectionCount === 0)}
-              className="icon-btn h-8 w-8 flex-shrink-0"
-              title={openSectionCount > 0 ? "Collapse all sections" : "Expand all sections"}
-              data-testid="sidebar-sections-toggle"
-            >
-              {openSectionCount > 0 ? <ChevronsDownUp size={17} /> : <ChevronsUpDown size={17} />}
-            </button>
-            <button
-              onClick={collapseSidebar}
-              className="icon-btn h-8 w-8 flex-shrink-0"
-              title="Collapse sidebar"
-              data-testid="sidebar-collapse-toggle"
-            >
-              <PanelLeftClose size={17} />
-            </button>
           </div>
 
           <SidebarSectionsContext.Provider value={sidebarSectionsCtx}>
+          <InspectorContext.Provider value={inspectorCtx}>
           <NiftiHeaderContext.Provider value={showLayerHeader}>
           {/* While peeking, only the chosen section shows, without its own
               heading row (the panel header above names it). */}
@@ -2790,9 +3085,9 @@ export default function Dashboard() {
 [data-peek-nav] [data-testid="${railPeek}-toggle"], [data-peek-nav] [data-testid="${railPeek}-close"] { display: none; }
 [data-peek-nav] > [data-testid="${railPeek}"] { margin: 0; border-color: transparent; background: transparent; }`}</style>
           )}
-          <nav aria-label="Sections" className="flex-1 overflow-y-auto thin-scroll px-2 py-2.5" data-peek-nav={peeking || undefined}
+          <nav aria-label="Sections" className={`flex-1 overflow-y-auto thin-scroll px-2 py-2.5 ${customOrder ? "flex flex-col" : ""}`} data-peek-nav={peeking || undefined}
             onContextMenu={openSectionMenu}>
-          <SidebarGroup>Volumes</SidebarGroup>
+          {!customOrder && <SidebarGroup>Volumes</SidebarGroup>}
           {/* === 1. Base Volume === */}
           <BaseVolumeSection
             viewerReady={viewerReady}
@@ -2811,6 +3106,8 @@ export default function Dashboard() {
             handleBaseColormap={handleBaseColormap}
             handleBaseColormapInvert={(_, on) => setBaseColormapInvert(!!on)}
             handleBaseCalRange={handleBaseCalRange}
+            baseTransform={baseTransform}
+            handleBaseTransform={handleBaseTransform}
             handleBaseFullWindow={handleBaseFullWindow}
             handleBaseAutoWindow={handleBaseAutoWindow}
             handleBaseColorbarToggle={handleBaseColorbarToggle}
@@ -2840,9 +3137,6 @@ export default function Dashboard() {
             ensureAtlasRegions={ensureAtlasRegions}
             ensureAtlasLoaded={ensureAtlasLoaded}
             userFileCache={userFileCache}
-            ensureRetinotopyLoaded={ensureRetinotopyLoaded}
-            retinoVolume={retinoVolume}
-            polarThresh={polarThresh}
             overlayMeta={overlayMeta}
             handleUserEdit={handleUserEdit}
             handleUserDuplicate={handleUserDuplicate}
@@ -2864,17 +3158,16 @@ export default function Dashboard() {
             requestHistogram={requestHistogram}
             thresholdVolumes={thresholdVolumes}
             scheduleThresholdVolume={scheduleThresholdVolume}
-            atlasState={atlasState}
-            allRetinotopyLayers={ALL_RETINOTOPY_LAYERS}
             selectedLesionIds={selectedLesionIds}
             layerNotes={layerNotes}
             onNotesChange={handleNotesChange}
             qcMni={lesionQcMni}
+            onOpenReport={openReportFor}
           />
 
           {/* === 2a. Draw / Mask (freehand + spherical ROI in one editable drawing) === */}
           <SidebarSection title="Draw mask" icon={PencilRuler} testId="section-drawing"
-            open={drawingSectionOpen} onOpenChange={setDrawingSectionOpen}>
+            open={drawingSectionOpen} onOpenChange={setDrawingSectionOpen} keepMounted={taskToolbar}>
             <DrawingPanel
               viewerRef={viewerRef}
               baseName={baseLabel}
@@ -2884,8 +3177,21 @@ export default function Dashboard() {
               onCrosshairOff={() => setCrosshair(false)}
               onSetCrosshair={(v) => setCrosshair(v)}
               onSaveDrawing={async (file, name) => {
-                const id = await addUserFile(file, "lesion", { name });
+                // After an Edit, the saved layer takes the edited one's look,
+                // re-applied the way a workspace restore does (applyWorkspace).
+                const style = editingStyleRef.current;
+                editingStyleRef.current = null;
+                const id = await addUserFile(file, "lesion", {
+                  name, ...(style && { colormap: style.colormap, opacity: style.opacity }),
+                });
                 if (!id) return id;
+                if (style) {
+                  const r = rangesToReapply(style, viewerRef.current?.getOverlayInfo?.(id)?.global_max);
+                  if (r.cal) handleCalRangeChange(id, ...r.cal);
+                  if (r.color) handleColorRangeChange(id, ...r.color);
+                  if (style.colorLocked) handleColorLockChange(id, true);
+                  if (style.colormapInverted) handleUserColormapInvert(id, true);
+                }
                 setDrawingSectionOpen(false);
                 setLesionSectionOpen(true);
                 scrollSectionIntoView("section-lesion");
@@ -2901,6 +3207,7 @@ export default function Dashboard() {
               scrollIntoView={() => scrollSectionIntoView("section-drawing")}
               drawTogglePending={drawTogglePending}
               onDrawToggleHandled={() => setDrawTogglePending(false)}
+              onTaskState={taskToolbar ? setTaskState : undefined}
             />
           </SidebarSection>
 
@@ -2963,7 +3270,25 @@ export default function Dashboard() {
             onNotesChange={handleNotesChange}
           />
 
-          <SidebarGroup>Analysis</SidebarGroup>
+          {!customOrder && <SidebarGroup>Analysis</SidebarGroup>}
+          {/* === 4a. Report: one place for a lesion's report (inbox 2 Nov) === */}
+          <ReportSection
+            open={reportSectionOpen}
+            onOpenChange={setReportSectionOpen}
+            lesionLayers={lesionLayers}
+            reportLesionId={reportLesionId}
+            setReportLesionId={setReportLesionId}
+            viewerRef={viewerRef}
+            standardAtlases={standardAtlases}
+            atlasState={atlasState}
+            ensureAtlasRegions={ensureAtlasRegions}
+            ensureAtlasLoaded={ensureAtlasLoaded}
+            userFileCache={userFileCache}
+            ensureRetinotopyLoaded={ensureRetinotopyLoaded}
+            retinoVolume={retinoVolume}
+            polarThresh={polarThresh}
+            allRetinotopyLayers={ALL_RETINOTOPY_LAYERS}
+          />
           {/* === 4b. Tract Dissection === */}
           <SidebarSection title="Tract dissection" icon={GitBranch} testId="section-tract-dissect" capability="dissect" open={tractDissectSectionOpen} onOpenChange={setTractDissectSectionOpen} keepMounted>
             {/* Needs the 673 MB whole-brain tractogram; without it the panel is
@@ -3018,11 +3343,11 @@ export default function Dashboard() {
           {/* === 9. Longitudinal === */}
           <SidebarSection title="Longitudinal" icon={GitCompareArrows} testId="section-longitudinal" capability="longitudinal" defaultOpen={false}>
             <LongitudinalPanel
-              onDiffLoaded={(file, opts) => addUserFile(file, "activation", { ...opts, name: `Longitudinal Diff · ${new Date().toLocaleDateString()}` })}
+              onDiffLoaded={(file, opts) => addUserFile(file, "activation", { ...opts, name: `Longitudinal difference · ${new Date().toLocaleDateString()}` })}
             />
           </SidebarSection>
 
-          <SidebarGroup>Reference</SidebarGroup>
+          {!customOrder && <SidebarGroup>Reference</SidebarGroup>}
           {/* === 6. Atlases === */}
           <AtlasesSection
             stdAtlasActive={stdAtlasActive}
@@ -3112,11 +3437,12 @@ export default function Dashboard() {
           />
 
 
-          <p className="px-2.5 pb-1 pt-4 text-[11.5px] leading-relaxed text-subtle">
+          <p className="px-2.5 pb-1 pt-4 text-[11.5px] leading-relaxed text-subtle" style={customOrder ? { order: SECTION_IDS.length } : undefined}>
             Atlases: AAL · Harvard-Oxford · Jülich (white matter). Retinotopy: Benson 2014 + Wang 2015. Cerebellum excluded in retinotopy.
           </p>
           </nav>
           </NiftiHeaderContext.Provider>
+          </InspectorContext.Provider>
           </SidebarSectionsContext.Provider>
           </div>
       </aside>
@@ -3153,13 +3479,16 @@ export default function Dashboard() {
           data-testid="sidebar-rail"
           onContextMenu={openRailMenu}
         >
+          {/* Decorative: no alt text, which showed as a clipped "MR" in the
+              28 px box whenever the image wasn't painted yet (inbox 6 Nov).
+              The name is the tooltip. */}
           <img
             src={copheLogo}
-            alt="MRLatte"
+            alt=""
             title={process.env.REACT_APP_VERSION ? `MRLatte ${process.env.REACT_APP_VERSION}` : "MRLatte"}
             className="mb-2 h-7 w-7 flex-shrink-0 rounded-[7px] object-cover"
           />
-          {sidebarSections.map((s) => {
+          {(customOrder ? [...sidebarSections].sort((a, b) => a.order - b.order) : sidebarSections).map((s) => {
             const Icon = s.icon;
             const on = railPeek === s.testId;
             return (
@@ -3189,22 +3518,18 @@ export default function Dashboard() {
                     <span className="absolute bottom-[5px] right-[5px] h-1.5 w-1.5 rounded-full shadow-[0_0_0_1.5px_hsl(var(--subtle-foreground))]" />
                   )}
                 </button>
-                {RAIL_BREAKS.has(s.testId) && <span className="my-1.5 h-px w-6 flex-shrink-0 bg-border" />}
+                {!customOrder && RAIL_BREAKS.has(s.testId) && <span className="my-1.5 h-px w-6 flex-shrink-0 bg-border" />}
               </React.Fragment>
             );
           })}
           <span className="flex-1" />
-          <button onClick={() => openStore(null)} className="icon-btn relative h-8 w-8 flex-shrink-0" title="Module store" aria-label="Module store" data-testid="rail-module-store">
+          <button onClick={() => openStore(null)} className="icon-btn relative h-8 w-8 flex-shrink-0" title={`Module store${installingTitle}`} aria-label="Module store"
+            aria-busy={modulesInstalling > 0 || undefined} data-testid="rail-module-store">
+            {installingRing}
             <Package size={17} />
             {modulesAbsent && (
               <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-warn shadow-[0_0_0_2px_hsl(var(--panel))]" />
             )}
-          </button>
-          <button onClick={toggleTheme} className="icon-btn h-8 w-8 flex-shrink-0"
-            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            data-testid="rail-theme-toggle">
-            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <button
             onClick={expandSidebar}
@@ -3225,8 +3550,17 @@ export default function Dashboard() {
           Files dropped anywhere on the viewer are opened by the app (named,
           listed, classified as base or overlay) — onDropCapture runs before
           niivue's own canvas listener, which would swallow the event. */}
+      {/* Movable panels (components/Movable.jsx): a dock area on each side of
+          the viewer (left and right full height, top and bottom between
+          them), and the toolbar's own lanes next to the viewer. Each takes no
+          room while nothing is docked in it. */}
+      <div className="flex min-h-0 min-w-0 flex-1">
+      <DockArea side="left" />
+      <DockLane side="left" />
+      <div className="flex min-h-0 min-w-[240px] flex-1 flex-col">
+      <DockArea side="top" />
       <main
-        className={`flex-1 flex flex-col min-h-0 min-w-0 ${whiteBackground ? "bg-white" : "bg-black"} relative`}
+        className={`flex-1 flex flex-col min-h-[160px] min-w-[240px] ${whiteBackground ? "bg-white" : "bg-black"} relative`}
         data-testid="viewer-main"
         onDragOverCapture={(e) => {
           if (Array.from(e.dataTransfer?.types || []).includes("Files")) {
@@ -3263,7 +3597,37 @@ export default function Dashboard() {
             <PanelTopOpen size={13} />
           </button>
         ) : (
-        <div role="toolbar" aria-label="View" className="toolbar flex min-h-12 flex-wrap items-center gap-[3px] border-b border-border bg-panel p-2" data-testid="topbar">
+        <Movable kind="toolbar" title="Toolbar" size={{ w: 380 }}>
+        {({ grip, floating, docked }) => {
+        // Beside the viewer it is a vertical strip of icons (owner, 10 Nov),
+        // which an expand button widens to show the names.
+        const vertical = docked === "left" || docked === "right";
+        return (
+        <div role="toolbar" aria-label="View" aria-orientation={vertical ? "vertical" : "horizontal"} data-testid="topbar"
+          data-vertical={vertical ? "" : undefined} data-expanded={vertical && toolbarExpanded ? "" : undefined}
+          data-side={docked || undefined}
+          className={`toolbar flex min-h-12 flex-wrap items-center gap-[3px] bg-panel p-2 ${
+            floating ? ""
+            : vertical ? `h-full ${docked === "left" ? "border-r" : "border-l"} border-border`
+            : docked === "bottom" ? "border-t border-border"
+            : "border-b border-border"}`}>
+          {grip}
+          {vertical && (
+            <button type="button" className="tb-i tb-expand" onClick={() => setToolbarExpanded(!toolbarExpanded)}
+              aria-pressed={toolbarExpanded} title={toolbarExpanded ? "Icons only" : "Show names"}
+              aria-label={toolbarExpanded ? "Icons only" : "Show names"} data-testid="toolbar-expand">
+              {toolbarExpanded === (docked === "left") ? <ChevronsLeft size={15} /> : <ChevronsRight size={15} />}
+            </button>
+          )}
+          {taskToolbar && <ToolModeButton mode={toolMode} target={toolSuggested} onToggle={toggleToolMode} />}
+          <div key={toolMode} className={taskToolbar ? "tool-stage flex min-w-0 flex-1 flex-wrap items-center gap-[3px]" : "contents"}
+            data-from={taskToolbar ? toolSweep || undefined : undefined} data-testid={taskToolbar ? "tool-stage" : undefined}>
+          <div className={taskToolbar ? "tool-set flex min-w-0 flex-1 flex-wrap items-center gap-[3px]" : "contents"}>
+          {toolMode === "tracing" ? (
+            <TracingTools activeTool={activeTool} brushMode={brushMode} task={taskState} />
+          ) : toolMode === "analysing" ? (
+            <AnalysingTools layer={inspectedLayer} onOpenReport={openReportFor} />
+          ) : (<>
           <div className="tb-seg">
             {SLICE_MODES.map((m) => {
               const Icon = m.icon;
@@ -3309,31 +3673,17 @@ export default function Dashboard() {
           >
             <NoseFlipIcon left={sagittalNoseLeft} />
           </button>
-          {/* Radiological / neurological convention (flips axial+coronal + labels).
-              Neither convention is "on", so both get the same plain box; the
-              letters say which side of the patient is on the screen's left. */}
-          <button
-            onClick={() => setRadiological((v) => !v)}
-            className="tb-b shadow-[inset_0_0_0_1px_hsl(var(--border))]"
-            data-testid="radiological-toggle"
-            data-convention={radiological ? "radiological" : "neurological"}
-            title={radiological
-              ? "Radiological: the patient's right is on the screen's left (R L). Click for neurological (L R)."
-              : "Neurological: the patient's left is on the screen's left (L R). Click for radiological (R L)."}
-          >
-            <span className="font-mono text-[11.5px] tracking-[0.12em]">{radiological ? "R L" : "L R"}</span>
-            <span className="tb-long">{radiological ? "Radiological" : "Neurological"}</span>
-          </button>
+          {/* Radiological / neurological and the theme moved to Preferences ▸ General (owner, 5 Nov). */}
           <span className="tb-sep" />
           {/* Right-drag mode: left-click is always crosshair (when not
-              drawing); this toggle only changes what right-drag does: Zoom /
-              Window / Pan (always clickable; clicking any of them while
+              drawing); this toggle only changes what right-drag does: Window /
+              Zoom / Pan (always clickable; clicking any of them while
               drawing exits draw mode) + a locked 4th "Right-drag: Erase"
               indicator while drawing is active. */}
-          <div className="tb-seg" data-testid="drag-mode-toggle" title="Right-drag: zoom, window or pan. Left-click always moves the crosshair.">
+          <div className="tb-seg" data-testid="drag-mode-toggle" title="Right-drag: window, zoom or pan. Left-click always moves the crosshair.">
             {[
-              { id: "zoom", icon: ZoomIn, label: "Zoom" },
               { id: "windowing", icon: Contrast, label: "Window" },
+              { id: "zoom", icon: ZoomIn, label: "Zoom" },
               { id: "pan", icon: Move, label: "Pan" },
             ].map((m) => {
               const Icon = m.icon;
@@ -3503,7 +3853,7 @@ export default function Dashboard() {
           >
             <Minimize2 size={16} />
           </button>
-          <button onClick={() => viewerRef.current?.saveScreenshot({ caption: baseLabel })}
+          <button onClick={() => takeScreenshotRef.current()}
             className="tb-i"
             aria-label="Screenshot"
             title="Screenshot (S)"
@@ -3543,19 +3893,15 @@ export default function Dashboard() {
             </button>
             {showMore && (
               <div className="popover absolute right-0 top-full z-50 mt-1.5 w-56 space-y-0.5 p-1.5" data-testid="toolbar-more-panel">
-                {/* Viewer background: black (default) or white (figures, screenshots) */}
                 <button
-                  onClick={() => { setWhiteBackground((v) => !v); setShowMore(false); }}
+                  onClick={() => { setShowPreferences(true); setShowMore(false); }}
                   className="tb-b w-full justify-start"
-                  data-testid="white-background-toggle"
-                  aria-pressed={whiteBackground}
-                  aria-label="White viewer background"
-                  title={whiteBackground
-                    ? "White viewer background (for figures and screenshots). Click for black, better for reading scans."
-                    : "Black viewer background. Click for white, for figures and screenshots."}
+                  aria-label="Preferences"
+                  data-testid="preferences-toggle"
+                  title={window.mrlatte ? "Preferences (Ctrl+,)" : "Preferences"}
                 >
-                  <Square size={15} fill={whiteBackground ? "currentColor" : "none"} />
-                  <span>White viewer background</span>
+                  <SlidersHorizontal size={15} />
+                  <span>Preferences</span>
                 </button>
                 <button
                   onClick={() => { setShowShortcuts(true); setShowMore(false); }}
@@ -3580,12 +3926,23 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+          </>)}
+          </div>
+          </div>
         </div>
+        );
+        }}
+        </Movable>
         )}
 
         <div ref={canvasWrapperRef} className="flex-1 relative min-h-0"
-          onPointerDownCapture={(e) => { if (e.button === 2) rightDownRef.current = { x: e.clientX, y: e.clientY }; }}
+          onPointerDownCapture={onViewerPointerDown}
+          onPointerUpCapture={onViewerPointerUp}
           onContextMenu={openViewerMenu}>
+          {launchedPlain && !homeDismissed && viewerReady && (
+            <HomeScreen onOpenFiles={openDroppedFiles} onDismiss={dismissHome}
+              onOpenRecent={(file, fullPath) => handleBaseUpload(file, { fullPath })} />
+          )}
           {startBase && (
             <NiivueViewer
               ref={viewerRef}
@@ -3596,6 +3953,7 @@ export default function Dashboard() {
               onLocationChange={handleLocationChange}
               onDoubleClickSlice={handleDoubleClickSlice}
               onClipRotateDelta={handleClipRotateDelta}
+              onWindowDrag={handleWindowDrag}
               onFrameChange={handleFrameChange}
               clipEnabled={clipEnabled}
               tractRender={tractRender}
@@ -3603,6 +3961,7 @@ export default function Dashboard() {
               whiteBackground={whiteBackground}
             />
           )}
+          <WindowDragHud ref={windowHudRef} />
           {/* Idle-drawing QC warning (useLesionQcIdle): persistent, just under
               the viewer's DRAW MODE badge, until the drawing changes or paint
               mode turns off — no close button by design. Orange = warning,
@@ -3629,6 +3988,35 @@ export default function Dashboard() {
                 Details
               </button>
             </div>
+          )}
+          {!focusMode && readoutMode === "beside" && (
+            <BesideReadout wrapperRef={canvasWrapperRef} viewerRef={viewerRef} activeOrientation={activeOrientation}
+              mm={crosshairMM} vox={crosshairVox} values={crosshairValues} labels={crosshairLabels} />
+          )}
+          {!focusMode && readoutMode === "chip" && (
+            <Movable kind="readout" title="Readout">
+              {({ grip, floating, docked }) => {
+                const stacked = docked === "left" || docked === "right";
+                const info = <CrosshairInfo bare={floating || !!docked} stacked={stacked} mm={crosshairMM} vox={crosshairVox} values={crosshairValues} labels={crosshairLabels} />;
+                if (floating) return info;
+                // Docked: only the numbers; the grip shows on hover (owner, 10 Nov:
+                // "too much chrome").
+                if (docked) {
+                  return (
+                    <div className="group/ro relative overflow-hidden" data-testid="readout-docked">
+                      {info}
+                      {grip && <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/ro:opacity-100">{grip}</div>}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="pointer-events-none absolute bottom-2 left-2 z-20 max-w-[calc(100%-1rem)]" data-testid="readout-chip">
+                    {info}
+                    {grip && <div className="pointer-events-auto absolute -right-2 -top-2">{grip}</div>}
+                  </div>
+                );
+              }}
+            </Movable>
           )}
           <ColorBarStack entries={colorBarEntries} />
           <FrameStepper frame={frameInfo.frame} nFrames={frameInfo.nFrames} onStepFrame={stepFrame} onSetFrame={setFrame} timeseriesData={timeseriesData} />
@@ -3658,7 +4046,7 @@ export default function Dashboard() {
                 </button>
                 <div className="text-[13px] font-medium text-foreground">No template installed</div>
                 <div className="text-[12px] text-muted-foreground leading-snug">
-                  Load a scan from Base Volume, or reinstall the MNI152 template.
+                  Load a scan from Base volume, or reinstall the MNI152 template.
                 </div>
                 <button
                   type="button"
@@ -3666,7 +4054,7 @@ export default function Dashboard() {
                   className="inline-flex items-center justify-center px-2.5 py-1 text-[12px] border border-border text-foreground hover:bg-panel-hover transition-colors"
                   data-testid="viewer-open-atlas-manager"
                 >
-                  Open Atlas Manager
+                  Open the atlas manager
                 </button>
               </div>
             </div>
@@ -3721,24 +4109,37 @@ export default function Dashboard() {
                 <span className="font-sans text-subtle">Scroll: move · Shift+scroll: gap</span>
               </div>
             )}
-            <CrosshairInfo
-              mm={crosshairMM}
-              vox={crosshairVox}
-              labels={crosshairLabels}
-              values={crosshairValues}
-              aside={
-                <div className="flex flex-shrink-0 items-center gap-3.5 text-[11.5px] text-muted-foreground">
-                  <div className="flex items-center gap-1.5" title={viewerReady ? "WebGL ready" : "Loading"}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${viewerReady ? "bg-ok" : "bg-warn"}`} />
-                    <span>{viewerReady ? "WebGL ready" : "Loading"}</span>
-                  </div>
-                  <div><span className="text-subtle">Overlays</span>{" "}<span className="font-mono text-foreground">{totalActive}</span></div>
-                </div>
-              }
-            />
           </div>
         )}
       </main>
+      <DockLane side="bottom" />
+      <DockArea side="bottom" />
+      </div>
+      <DockLane side="right" />
+      <DockArea side="right" />
+      </div>
+
+      {/* The inspector: the selected layer's settings (lib/inspector.js). */}
+      {inspectorOn && inspected && (
+        <Movable kind="inspector" title="Layer settings" size={{ w: 320, h: 520 }}>
+          {({ grip, floating, docked }) => (
+            <aside aria-label="Layer settings"
+              className={floating || docked ? "flex h-full min-h-0 w-full flex-col"
+                : "flex w-[320px] flex-shrink-0 flex-col border-l border-border bg-panel"}
+              data-testid="inspector">
+              {!floating && (
+                <div className="flex h-11 flex-shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-2">
+                  <span className="cap flex-1 text-subtle">Layer settings</span>
+                  {grip}
+                  <button type="button" className="icon-btn h-7 w-7" onClick={() => setInspected(null)}
+                    aria-label="Close layer settings" title="Close layer settings" data-testid="inspector-close"><X size={15} /></button>
+                </div>
+              )}
+              <div ref={setInspectorEl} className="inspector-body min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5 thin-scroll" />
+            </aside>
+          )}
+        </Movable>
+      )}
 
       {/* Module store overlay. Renders nothing until opened — from the sidebar
           header button or from a ModuleGate install prompt (both go through
@@ -3749,6 +4150,10 @@ export default function Dashboard() {
           import wizard. Renders nothing until opened (AtlasProvider's
           openManager), from the Atlases section header or its empty state. */}
       <AtlasManager onChanged={refreshAtlases} />
+      <PreferencesDialog open={showPreferences} onOpenChange={setShowPreferences}
+        now={{ radiological, setRadiological, whiteBackground, setWhiteBackground }} />
+      <FirstRun />
+      <CommandPalette open={showPalette} onClose={() => setShowPalette(false)} commands={paletteCommands} />
 
       {/* Keyboard shortcuts help overlay */}
       {showShortcuts && (
@@ -3756,16 +4161,19 @@ export default function Dashboard() {
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
           onClick={() => setShowShortcuts(false)}
           data-testid="shortcuts-help"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Keyboard shortcuts"
         >
           <div
-            className="w-[380px] max-w-[90vw] border border-border bg-panel p-5 shadow-xl rounded-lg"
+            className="modal-panel w-[380px] max-w-[90vw] rounded-xl border border-edge bg-panel p-6 shadow-elev-2"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 text-[13px] font-medium text-foreground">
                 <Keyboard size={14} className="text-muted-foreground" /> Keyboard shortcuts
               </div>
-              <button onClick={() => setShowShortcuts(false)} className="text-muted-foreground hover:text-foreground" data-testid="shortcuts-help-close">
+              <button onClick={() => setShowShortcuts(false)} className="icon-btn" aria-label="Close" title="Close (Esc)" data-testid="shortcuts-help-close">
                 <X size={14} />
               </button>
             </div>
@@ -3778,13 +4186,14 @@ export default function Dashboard() {
                 ["1 / 2 / 3", "Axial / Coronal / Sagittal view"],
                 ["0", "Reset zoom / pan"],
                 ["C", "Toggle crosshair"],
-                ["W", "Cycle drag mode (locate/window/pan)"],
+                ["W", "Cycle drag mode (window/zoom/pan)"],
                 ["F", "Focus mode"],
                 ["S", "Screenshot"],
                 ["D", "Toggle drawing mode"],
                 ["I", "Interpolate last 2 slices"],
                 ["Shift + I", "Interpolate all drawn slices"],
                 ["← / →", "Previous / next frame (4D)"],
+                [window.mrlatte?.platform === "darwin" ? "⌘ + K" : "Ctrl + K", "Command palette"],
                 ["?", "This help"],
               ].map(([k, d]) => (
                 <React.Fragment key={k}>
@@ -3861,7 +4270,9 @@ export default function Dashboard() {
         alwaysEmbedded={saveDialogInfo.alwaysEmbedded}
         embedBytes={saveDialogInfo.embedBytes}
       />
+      </div>
     </div>
+    </DockProvider>
     </ColorLockContext.Provider>
     </TransformPivotContext.Provider>
   );

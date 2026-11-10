@@ -27,10 +27,11 @@ export async function dicomConvertAvailable() {
  * Convert a DICOM folder (or .zip) via the backend. dcm2niix may emit multiple
  * series; this returns the list so the caller can pick one.
  * @param {FileList|File[]} fileList
- * @param {(fraction:number)=>void} [onUploadProgress]  upload progress 0..1
+ * @param {(fraction:number, loaded:number, total:number)=>void} [onUploadProgress]  upload progress 0..1, and bytes
+ * @param {()=>void} [onUploadDone]  every byte is sent: the conversion starts now
  * @returns {Promise<{job_id:string, series:Array<{id,name,description,dims,n_slices,bytes}>}>}
  */
-export async function convertDicom(fileList, onUploadProgress) {
+export async function convertDicom(fileList, onUploadProgress, onUploadDone) {
   const fd = new FormData();
   for (const f of fileList) fd.append("files", f, f.name);
 
@@ -41,9 +42,10 @@ export async function convertDicom(fileList, onUploadProgress) {
     xhr.responseType = "json";
     if (onUploadProgress && xhr.upload) {
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) onUploadProgress(e.loaded / e.total);
+        if (e.lengthComputable) onUploadProgress(e.loaded / e.total, e.loaded, e.total);
       };
     }
+    if (onUploadDone && xhr.upload) xhr.upload.onload = () => onUploadDone();
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(xhr.response);
@@ -67,8 +69,10 @@ export function dicomSeriesDownloadUrl(jobId, seriesId) {
 
 /**
  * Fetch one converted series as a File to hand to the volume loaders.
+ * onProgress(loaded, total) as it arrives; total is null when the response
+ * doesn't say its size.
  */
-export async function fetchDicomSeriesFile(jobId, seriesId) {
+export async function fetchDicomSeriesFile(jobId, seriesId, onProgress) {
   const r = await fetch(dicomSeriesDownloadUrl(jobId, seriesId));
   if (!r.ok) {
     let detail = `HTTP ${r.status}`;
@@ -77,6 +81,23 @@ export async function fetchDicomSeriesFile(jobId, seriesId) {
     } catch { /* keep status */ }
     throw new Error(detail);
   }
-  const blob = await r.blob();
+  let blob;
+  if (onProgress && r.body?.getReader) {
+    const total = Number(r.headers.get("content-length")) || null;
+    const reader = r.body.getReader();
+    const parts = [];
+    let loaded = 0;
+    onProgress(0, total);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      loaded += value.byteLength;
+      onProgress(loaded, total);
+    }
+    blob = new Blob(parts, { type: "application/gzip" });
+  } else {
+    blob = await r.blob();
+  }
   return new File([blob], `${seriesId}.nii.gz`, { type: "application/gzip" });
 }

@@ -154,7 +154,7 @@ export const DaLnMapperPanel = ({
   // correct "which lesion mask is this LNM run based on" value.
   const deriveDefaultActivationName = () => {
     const lesionName = stripNiftiExt(getFile()?.name);
-    return lesionName ? truncateName(`Network of ${lesionName}`) : "Lesion Network Map";
+    return lesionName ? truncateName(`Network of ${lesionName}`) : "Lesion network map";
   };
 
   const useDrawing = async () => {
@@ -330,7 +330,7 @@ export const DaLnMapperPanel = ({
         setOverlayLoaded(false);
       }
       setActivationSaved(true);
-      toast.success("Saved to Activation Maps", { description: name });
+      toast.success("Saved to Activation maps", { description: name });
     } catch (e) {
       toast.error("Save failed", { description: e?.message });
     } finally {
@@ -346,6 +346,7 @@ export const DaLnMapperPanel = ({
   const { job, setJob, busy, cancelling, cancel: handleCancel } = useJobPoll({
     statusFn: lnmStatus,
     cancelFn: cancelLnm,
+    notifyLabel: "Lesion network mapping",
     onCancelled: () => toast.info("Lesion network mapping cancelled"),
     onError: (s) => toast.error("Lesion network mapping failed", { description: s.error }),
     onDone: async (s) => {
@@ -434,7 +435,7 @@ export const DaLnMapperPanel = ({
             ? "Backend server unavailable — start the backend and reload."
             : available?.bundle_present === false
               ? "Connectome bundle not found on server (set LNM_BUNDLE)."
-              : (available?.reason || "Degree Adjusted Lesion Networking unavailable.")}
+              : (available?.reason || "Degree-adjusted lesion network mapping is unavailable.")}
         </div>
       )}
 
@@ -618,7 +619,7 @@ export const DaLnMapperPanel = ({
           {onSaveActivation && (result?.files?.spec_net || result?.files?.thresh_cont) && (
             activationSaved ? (
               <div className="font-mono text-[11px] text-ok border border-border px-2 py-2 rounded-lg" data-testid="lnm-saved-notice">
-                Saved to Activation Maps — full threshold/colormap controls are there now.
+                Saved to Activation maps — full threshold/colormap controls are there now.
               </div>
             ) : (
               <div className="space-y-1.5">

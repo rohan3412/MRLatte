@@ -25,7 +25,13 @@ export const LIGHT_SPECULAR      = 0.4;
 export const LIGHT_SHINE         = 5.0;    // mrview default
 export const LIGHT_DIR           = [0.0, 0.0, -1.0];  // unit, view space (headlight)
 export const BASE_THICKNESS_MM   = 0.35;   // thickness at UI slider 50 / mrview slider 0
-export const MIN_THICKNESS_PX    = 1.0;    // a tube never gets thinner than one pixel
+// A tube or point is never drawn thinner than this, in screen (CSS) pixels;
+// the renderer scales it by the device pixel ratio. It was 1 device pixel,
+// which at whole-brain zoom made Pseudotubes and Points as thin as Lines for
+// the whole lower half of the thickness slider (0.35 mm at its default is
+// under a pixel there), so the three modes looked alike (inbox 6 Nov). Lines
+// are GL lines and stay 1 px.
+export const MIN_THICKNESS_PX    = 3.0;
 export const POINT_BUDGET_TUBES  = 4e6;
 export const POINT_BUDGET_LINES  = 1.2e7;
 
@@ -205,9 +211,15 @@ void main() {
 #endif
 
 #ifdef LIGHTING
-  rgb *= ambient + diffuse * clamp(dot(lightDir, N), 0.0, 1.0);
+  // lightDir is the way the headlight's light travels (into the scene, -z);
+  // N faces the viewer (+z). So diffuse uses the direction TO the light,
+  // -lightDir, and the reflected ray is compared with the direction to the
+  // viewer, +z. Both signs were flipped, which lit tubes and points from
+  // behind: a surface facing you got ambient only, so lighting darkened them
+  // (inbox 6 Nov: the modes looked alike).
+  rgb *= ambient + diffuse * clamp(dot(-lightDir, N), 0.0, 1.0);
   vec3 R = reflect(lightDir, N);
-  rgb += specular * pow(clamp(-R.z, 0.0, 1.0), shine);
+  rgb += specular * pow(clamp(R.z, 0.0, 1.0), shine);
 #endif
 
   a *= occludedScale * mix(1.0, depthCueFloor, v_depth01) * passScale;

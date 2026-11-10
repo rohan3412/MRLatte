@@ -4,7 +4,181 @@ What changed in each MRLatte release, newest first. Each release's notes are wri
 the text of the GitHub release is copied from its section.
 Releases: https://github.com/cogneuro-rgb/MRLatte/releases
 
-## [0.5.0] — unreleased
+## [0.6.0] — unreleased
+
+MRLatte for macOS, one Report section for lesion reports, and fixes from the inbox.
+
+### A new look (first stage)
+- **MRLatte has its own title bar** in the desktop app: the COPHE mark, an MRLatte menu button
+  (Windows and Linux), the scan's name with the preset in use, and a search box in the middle that
+  opens the command palette (Ctrl K). The window buttons stay, so Windows 11 snap layouts still work.
+- **The bottom status bar is gone.** The crosshair's coordinates, values and region names now sit in
+  a frosted chip in the viewer's bottom-left corner, in fixed columns so names don't jump as the
+  numbers change. Preferences > Viewer > Readout can put it beside the crosshair instead. The layer
+  count is on the sidebar heading.
+- **Task toolbar** (Preferences > Sidebar > Panels, off by default): a button at the left of the
+  toolbar swaps the viewing tools for the tools of the task at hand: tracing while you draw, and
+  analysing (quality check, atlas overlap, clusters, report) when a lesion or activation layer is
+  selected. Every button does what its sidebar twin does.
+- **Movable panels** (same place, off by default): drag the layer settings, the toolbar or the
+  readout by their grip. Drop on a highlighted edge of the viewer to dock there, anywhere else to
+  float it. Each preset remembers its own layout; Esc cancels a drag.
+- **Draw mask in a narrow sidebar** now keeps the brush radius in view, on one compact row.
+- Everything new is off or still when Performance mode or Reduce Motion is on.
+
+### macOS
+- **MRLatte now runs on Macs**, on Apple Silicon and Intel, macOS 12 or newer: a disk image for
+  each, with the same offline, self-contained app as on Windows. That includes the analysis
+  engine, DICOM import, the atlases and one-click modules from the module store.
+- Double-click a `.nii` or `.mrlatte` file in Finder (or use Open With for `.nii.gz`) to open it in
+  MRLatte. `mrlatte://` links work too.
+- Closing the last window keeps MRLatte in the Dock, as Mac apps do; clicking the icon opens a new
+  window. Quitting stops everything it started.
+- **Fixed on Mac: reports with tract disconnection or network mapping** stopped with a numpy
+  import error. The analysis steps run as separate Python processes, and on the Mac those could
+  not find the app's Python packages. The build now checks this, and runs a real report job.
+- **Fixed on Mac: a right-drag on the image no longer opens the right-click menu.** macOS asks for
+  the menu as soon as the button goes down, so the menu opened at the start of every right-drag
+  (zoom, window, pan) and broke it. The menu now waits for the release and opens only if the
+  pointer stayed put, as on Windows.
+- **If the Intel version is installed on an Apple Silicon Mac**, MRLatte says so once and names the
+  Apple Silicon disk image to install instead: through Rosetta everything is much slower.
+- The Mac app is not yet signed by Apple. The first time, open it via System Settings → Privacy &
+  Security → **Open Anyway**, or run
+  `xattr -dr com.apple.quarantine /Applications/MRLatte.app` once.
+
+### One place for a lesion's report
+- **A new Report section** (under Analysis) replaces the two tools that overlapped: the one-click
+  lesion report and LQTpy analysis. Pick the lesion and tick what to include: atlas overlap, visual
+  field, tract disconnection, network mapping. Overlap and visual field alone are ready in seconds;
+  tract disconnection and network mapping run in the background, with progress and Cancel at the
+  bottom left. The report opens when it's ready and can also be saved as PDF or text.
+- Each lesion has a **Report…** button that opens the section with that lesion chosen.
+- Operations whose module isn't installed are greyed out, with an **Install…** link that opens the
+  module store at it.
+- Tract dissection and lesion network mapping keep their own reports for their own runs.
+
+### Smaller: SciPy and LQTpy are modules, and a viewer-only installer
+- **SciPy (37 MB) and LQTpy are no longer part of the standard install.** They install from the
+  module store when you first need them: the quality check (Check drawing, Check on a lesion mask,
+  Fix), the lesion measures in the report and LQTpy Analysis offer **Install LQTpy…** in place of
+  the check. The report job itself (atlas overlap, visual field) still works without them.
+- **Modules can need other modules.** LQTpy needs SciPy, SciPy needs NumPy, tract dissection and
+  network mapping need SciPy. Installing one asks to **install both** (or all of them) in the right
+  order; a module another one needs can't be removed from under it, and the store says which.
+- **A viewer-only installer** (`build-viewer.bat`, `build-mac.sh --viewer`): opens NIfTI files and
+  shows their headers, with no NumPy, SciPy, LQTpy, template or atlases. Everything else installs
+  from the module store, back to the whole of MRLatte. Something that needs a module it doesn't
+  have yet says which one.
+
+### Preferences
+- **A Preferences window** (More ▸ Preferences, or Ctrl+, in the desktop app). Choose System, Light
+  or Dark for the look, and **hide the sections that need a module** you have not installed, so the
+  sidebar and its icon rail show only what works. Install the module and its section comes back.
+- **How the viewer opens**, also in Preferences: radiological (R L) or neurological (L R), the
+  layout, a black or white background, and the crosshair (on or off, its colour and thickness).
+  The toolbar still changes each for the session; a workspace that saved its own view opens as saved.
+- **The drawing's background quality check** can be switched off, or wait longer or shorter than
+  the 30 s it waited before.
+
+### Fixed and improved
+- **Longitudinal comparison always aligns the follow-up to the baseline**, also when both scans
+  share a voxel grid (the head may have moved between sessions). It moves and turns the scan
+  (rigid registration) and never stretches it, so real change such as lesion growth stays visible.
+- **A report shows streamline disconnection only when Tract disconnection was ticked.** Before, a
+  "Streamline disconnection: not available" line appeared in every report.
+- **The "beside the crosshair" readout stays inside its own view** instead of running into the next one.
+- **One highlighted button among the presets:** Everything's "Use" (the recommended start).
+- **The View menu says "Multiplanar + 3D"**, the same as the command palette.
+- **Quit always finishes.** On an Intel Mac, Quit could leave the app open with its backend already
+  stopped. MRLatte now closes its windows at once on Quit, and a backstop outside the app ends it if
+  it is still running 12 s later (macOS and Linux).
+- **A plain right-click on the image no longer shows the window-drag readout** behind its menu. The
+  readout appears once the pointer actually moves.
+- **The desktop app repaints after resizing and after the Ctrl key hints hide.** With the see-through
+  window on Windows, stale strips of the sidebar stayed on screen, and the "D" key badge stayed until
+  the mouse crossed the sidebar.
+- **The sidebar's top row is a slim row of buttons, and which ones is a preference** (Preferences ▸
+  Sidebar ▸ Header buttons): the module store, collapse all, collapse sidebar by default, plus light /
+  dark mode, search, screenshot, focus mode, shortcuts and Preferences. The desktop app's title bar
+  already names MRLatte, so the logo, name and version left the sidebar (the title bar logo's tooltip
+  gives the version), and the preset chip left the title bar.
+- **Movable panels, redone** (Preferences ▸ Sidebar ▸ Panels):
+  - Four dock areas, one on each side of the viewer. Panels docked on one side stack and share it,
+    with a divider between each pair; the area's inner edge sets its size; the viewer keeps at least
+    240 px, and the areas give way first in a small window.
+  - Floating cards resize from their edges and corners, snap to the window, the viewer, the dock
+    areas and each other (a guide line shows what they caught), and slide into place on release.
+  - Every sidebar section can dock beside the viewer too, not only float.
+  - The toolbar docked left or right is a strip of icons with an expand button that shows the names;
+    its menus open beside it.
+  - The readout, docked or floating, is only the numbers: no header, the grip and the put-back button
+    show on hover.
+- **Level and Width sliders on the base volume.** The base card now has Level and Width sliders (with values you can type) under the Window range, so you can set from the sidebar what a right-drag sets. All three stay in step, and they move live while you right-drag in the viewer.
+- **Window is the first right-drag mode, and the default.** The toolbar order is now Window, Zoom, Pan, and a new session starts in Window (a saved workspace still restores its own mode).
+- **The window drag readout shows its limits.** The small grid now draws the reachable area as a red dotted line, so you can see the edge the dot stops at.
+- **Layer names no longer start with "Lesion · ".** A loaded mask, ROI, atlas or tract file is shown by its own name; where a list mixes kinds (for example the measurement mask picker) lesions end with "(lesion)".
+- **Smoother 3D while you move it.** Turning or zooming the 3D view now stays fluid on slower computers: if frames start to lag, MRLatte draws the 3D view more coarsely and shows fewer tract lines until you stop, then sharpens it again (a small "Preview" label shows while it does). Slices, measurements, screenshots and reports are always full quality. Switch it on under Preferences, Faster 3D while moving.
+- **A better window drag.** With Right-drag set to Window, dragging up and down moves the level
+  and left and right the width, at a speed that follows the scan's own value range, so a 0–1 map
+  and a CT feel the same (it used to step one raw unit per mouse move: crawling on CT, jumping on
+  small-valued maps). Hold Shift for fine control. While you drag, a readout next to where the
+  drag began (it stays put) shows the level, the width and the values shown, on a small grid of
+  width against level with where the drag started; the base card takes the new window when you
+  let go.
+- **The base volume can be moved, turned and resized again** (its Position block, as on overlays),
+  to line a scan up under the template, atlases and overlays, which stay where they are. A drawing
+  made on the moved base is saved at the moved position. The scan's file isn't changed; a
+  workspace stores the adjustment with the base (such workspaces need 0.6.0 or newer).
+- **A clearer progress bar for DICOM import.** Four steps (upload, convert, download, open), each
+  with its own segment: the upload and the download fill with real megabytes and a percentage,
+  and the conversion and opening count the seconds, so a long import no longer sits at "Uploading
+  100 %" while dcm2niix works.
+- **MRtrix images open: .mif and .mif.gz**, from the file buttons, by dropping them on the viewer,
+  with Open with or a double-click. MRLatte turns each into a NIfTI as it opens (same voxels and
+  position), so every analysis can read it too.
+- **Pseudotubes, lines and points now look different.** At the default thickness, tubes and points
+  were drawn about one pixel wide at whole-brain zoom, so all three looked like lines; they now
+  keep at least 3 px. Fixed: lighting lit them from behind, so turning it on darkened them instead
+  of shading them. Lighting is now on by default.
+- **Sidebar tool buttons switch to icons when the sidebar is narrow** (pen, brush, interpolate,
+  measurements) instead of cutting their labels off; "Interpolate all" steps down to "All (Axial)",
+  then "All".
+- **Fixed: "Failed to load panel (network error)" could never be retried.** Try again now
+  downloads the panel again; before, only a reload helped.
+- **The collapsed sidebar always shows the COPHE cup at the top**, never a clipped "MR".
+- **A Clusters… button on each activation map** opens Cluster analysis with that map chosen.
+- **Fixed: cluster peaks were in the wrong place.** The MNI column and Go to peak ignored the
+  map's origin, so Go to landed outside the brain, and a map stored left-right flipped (as FSL's
+  MNI maps are) would have shown the other side. The atlas label at each peak now also works when
+  the map and the atlas are on different grids.
+- **The sidebar header's buttons close up in a narrow sidebar** instead of crowding the MRLatte
+  name; the name and version give way to the logo only below 270 px.
+- **The app stays responsive during a DICOM import.** The conversion used to hold up every other
+  request until it finished; it now runs in the background, uploads are copied to disk instead of
+  being held in memory, and the log records how long each step took.
+- **Atlas overlap for several atlases at once.** Tick the atlases you want; the table gets an Atlas
+  column, and so does its CSV.
+- **Undo and Redo say what they will do.** Hover over either button: "Undo: Pen stroke",
+  "Redo: Dilate".
+- **Editing a mask turns the crosshair off**, as entering draw mode any other way does, and turns
+  it back on when you stop drawing.
+- **Chosen items are easier to see in the dark theme.** Selected atlases and active draw mode now
+  use the accent tint, and pressed buttons are a step brighter.
+- **MRLatte fits in a much narrower window**: 560 px wide with the sidebar open (was 880) and 320 px
+  with it closed (was 480). The sidebar can be dragged down to 220 px (was 260).
+- **You can see when a module is installing.** While a module or atlas downloads and installs, the
+  module store icon (sidebar header and collapsed rail) has a turning ring and says how many are
+  installing, even with the store and the Atlas Manager closed.
+- **An edited lesion mask keeps its look.** Editing a mask in Draw mask and saving it used to give
+  the saved mask the next colour in the palette (a red mask came back blue) and default ranges. It
+  now keeps the colour map, opacity, visibility range and colour range it had.
+- **One scrollbar style everywhere.** Every scrolling list now uses the slim themed scrollbar;
+  several still showed the thick system one.
+- **The installer has its own icon**: the MRLatte icon with a download badge, so the setup file is
+  easy to tell apart from the app.
+
+## [0.5.0] — 2026-10-29
 
 Much faster and a third smaller, small workspaces that link to your scans (or hold everything) and
 open with a double-click, a clearer module store, an Atlas Manager where each atlas installs and is

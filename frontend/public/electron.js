@@ -14,6 +14,14 @@
 // which points resourcesDir() at an assemble-bundle.ps1 output folder.
 
 const { app, BrowserWindow, Menu, shell, dialog, ipcMain, session, nativeTheme } = require("electron");
+
+// Tests only: run against a throwaway profile. MRLATTE_USER_DATA_DIR moves
+// userData (settings, recent files, browser cache and the single-instance
+// lock), so a smoke test never touches, or attaches to, a real install.
+// Windows ignores an overridden APPDATA here, hence a variable of our own.
+if (process.env.MRLATTE_USER_DATA_DIR) {
+  try { app.setPath("userData", process.env.MRLATTE_USER_DATA_DIR); } catch (_e) { /* keep the default */ }
+}
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
@@ -66,12 +74,13 @@ const pendingOpenByWc = new Map();
 const allowedOpenPaths = new Set();
 const MAX_OPEN_BYTES = 1.5 * 1024 ** 3;
 
-// Window minimum size. With the sidebar closed the viewer gets the whole
-// window, so the minimum drops to what the viewer already had at the
-// sidebar-open minimum (880 − the default 400px sidebar = 480). The renderer
-// only reports open/closed (mrlatte:setSidebarOpen); the sizes live here.
-const MIN_WIDTH_SIDEBAR_OPEN = 880;
-const MIN_WIDTH_SIDEBAR_CLOSED = 480;
+// Window minimum size, kept small so MRLatte fits beside other windows
+// (inbox 2 Nov: "the minimum width must be much smaller"). Sidebar open:
+// the narrowest sidebar (220px) plus a 340px viewer; closed: the 56px rail
+// plus a ~264px viewer. The renderer only reports open/closed
+// (mrlatte:setSidebarOpen); the sizes live here.
+const MIN_WIDTH_SIDEBAR_OPEN = 560;
+const MIN_WIDTH_SIDEBAR_CLOSED = 320;
 const MIN_HEIGHT = 560;
 
 // A path arrives on argv either quoted or not, and NSIS launches as
@@ -92,7 +101,7 @@ const WORKSPACE_EXT_RE = /\.(mrlatte|nvws\.json|nvws)$/i;
 // asking first if any is on another computer (\\server\share: reading one makes
 // Windows contact that server). Files: images MRLatte opens; a DICOM base's
 // source is a .zip or a folder.
-const LINKABLE_RE = /\.(nii|nii\.gz|gz|mgz|mgh|zip)$/i;
+const LINKABLE_RE = /\.(nii|nii\.gz|gz|mgz|mgh|mif|zip)$/i;
 const workspaceLinksByWc = new Map();   // webContents.id -> { files: [], folders: [] }
 const allowedDicomFolders = new Set();
 function linksFromWorkspaceText(text) {
@@ -162,7 +171,8 @@ function headerPathFromArgv(argv, cwd = process.cwd()) {
   const a = i >= 0 ? argv[i + 1] : null;
   if (!a) return null;
   const p = path.isAbsolute(a) ? a : path.resolve(cwd, a);
-  return ALLOWED_EXT_RE.test(p) && fs.existsSync(p) && fs.statSync(p).isFile() ? p : null;
+  // NIfTI only: the header window reads a NIfTI header (a .mif has none).
+  return /\.(nii|nii\.gz)$/i.test(p) && fs.existsSync(p) && fs.statSync(p).isFile() ? p : null;
 }
 
 // The header window only needs the file's leading bytes: 348 (NIfTI-1) or
@@ -200,11 +210,15 @@ function readHeaderBytes(filePath) {
 // It used to start as normal and quietly show the template (a .tar.gz passed
 // the old bare ".gz" check, then failed to load). Null when argv names no
 // existing file, or one that opens. In dev, argv[1] is the app (`electron .`).
-const OPENABLE_HINT = "MRLatte opens NIfTI images (.nii, .nii.gz) and MRLatte workspaces (.mrlatte).";
+const OPENABLE_HINT = "MRLatte opens NIfTI images (.nii, .nii.gz), MRtrix images (.mif, .mif.gz) and MRLatte workspaces (.mrlatte).";
 function isNiftiHeader(bytes) {
   if (!bytes || bytes.length < 4) return false;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, 4);
   return [dv.getInt32(0, true), dv.getInt32(0, false)].some((n) => n === 348 || n === 540);
+}
+// An MRtrix image starts with the line "mrtrix image".
+function isMifHeader(bytes) {
+  return !!bytes && bytes.length >= 12 && Buffer.from(bytes.subarray(0, 12)).toString("latin1") === "mrtrix image";
 }
 async function refusedOpenFromArgv(argv, cwd = process.cwd()) {
   for (const a of argv.slice(process.defaultApp ? 2 : 1)) {
@@ -220,12 +234,15 @@ async function refusedOpenFromArgv(argv, cwd = process.cwd()) {
     }
     if (!ALLOWED_EXT_RE.test(p)) {
       return { path: p, reason: /\.gz$/i.test(name)
-        ? `"${name}" is a compressed file whose name doesn't end in .nii.gz, so it isn't a NIfTI image.`
-        : `"${name}" isn't a NIfTI image or an MRLatte workspace.` };
+        ? `"${name}" is a compressed file whose name doesn't end in .nii.gz or .mif.gz, so it isn't an image MRLatte reads.`
+        : `"${name}" isn't an image MRLatte reads or an MRLatte workspace.` };
     }
     const r = await readHeaderBytes(p);
-    if (!r.ok || !isNiftiHeader(r.bytes)) {
-      return { path: p, reason: `"${name}" has a NIfTI name, but its contents aren't a NIfTI image.` };
+    const mif = /\.mif(\.gz)?$/i.test(name);
+    if (!r.ok || !(mif ? isMifHeader(r.bytes) : isNiftiHeader(r.bytes))) {
+      return { path: p, reason: mif
+        ? `"${name}" has an MRtrix name, but its contents aren't an MRtrix image.`
+        : `"${name}" has a NIfTI name, but its contents aren't a NIfTI image.` };
     }
     return null;
   }
@@ -273,11 +290,22 @@ function resourcesDir() {
   return process.env.MRLATTE_RES_DIR || process.resourcesPath;
 }
 
-// Per-user, machine-local data (results + logs). Uses %LOCALAPPDATA% so it is
-// NOT roaming and needs no admin rights.
+// Per-user, machine-local data (results + logs). Windows: %LOCALAPPDATA% so it
+// is NOT roaming and needs no admin rights. macOS: the app's own folder,
+// ~/Library/Application Support/MRLatte, which already ends in the app's name.
 function dataDir() {
+  if (process.platform !== "win32") return app.getPath("userData");
   const base = process.env.LOCALAPPDATA || app.getPath("userData");
   return path.join(base, "MRLatte");
+}
+
+// The bundled interpreter: Windows' embeddable python.exe, or on macOS the
+// python-build-standalone binary (tools/build/assemble-bundle.sh keeps the real
+// file, bin/python3.11, and drops the bin/python3 symlink).
+function pythonExe(res) {
+  return process.platform === "win32"
+    ? path.join(res, "python", "python.exe")
+    : path.join(res, "python", "bin", "python3.11");
 }
 
 function ensureDir(p) {
@@ -528,7 +556,7 @@ async function waitFor(fn, timeoutMs) {
 // --------------------------------------------------------------------------- //
 async function startBackend(port, onStatus) {
   const res = resourcesDir();
-  const python = path.join(res, "python", "python.exe");
+  const python = pythonExe(res);
   const backendDir = path.join(res, "backend");
   const sitePkgs = path.join(res, "python", "site-packages");
   const staticDir = path.join(res, "frontend_build");
@@ -570,7 +598,8 @@ async function startBackend(port, onStatus) {
   // A core install has none and adds nothing (it installs each on demand as a
   // one-click module, under the module root — backend/deps.py
   // add_installed_python_modules).
-  const optionalStackInserts = ["python-reports", "python-validation", "python-longitudinal", "python-dissection"]
+  const optionalStackInserts = ["python-reports", "python-validation", "python-longitudinal", "python-dissection",
+    "python-scipy", "python-lqtpy"]
     .map((d) => path.join(res, d))
     .filter((p) => fs.existsSync(p))
     .map((p) => `sys.path.insert(0, r'${p}');`)
@@ -591,6 +620,9 @@ async function startBackend(port, onStatus) {
     env,
     stdio: ["ignore", out, out],
     windowsHide: true,
+    // macOS/Linux: its own process group, so killTree can stop uvicorn and
+    // every worker it started in one signal (Windows uses taskkill /T).
+    detached: process.platform !== "win32",
   });
   backendProc.on("exit", (code) => {
     if (!shuttingDown) onServiceCrash("MRLatte backend", code);
@@ -611,7 +643,7 @@ async function startBackend(port, onStatus) {
   if (!ok) {
     throw new Error(
       "The MRLatte application did not respond in time.\n" +
-        "See logs\\backend.log in your MRLatte data folder."
+        `See ${path.join("logs", "backend.log")} in your MRLatte data folder.`
     );
   }
 }
@@ -626,7 +658,13 @@ function killTree(proc) {
       // /T kills the whole tree (uvicorn spawns worker python.exe children).
       execFile("taskkill", ["/PID", String(proc.pid), "/T", "/F"]);
     } else {
-      proc.kill("SIGTERM");
+      // The backend leads its own process group (detached at spawn), so the
+      // negative pid reaches uvicorn and its workers alike.
+      try {
+        process.kill(-proc.pid, "SIGTERM");
+      } catch (_e) {
+        proc.kill("SIGTERM");
+      }
     }
   } catch (_e) {
     /* best effort */
@@ -695,7 +733,7 @@ function registerIpc() {
         defaultId: 0,
         cancelId: 1,
         message: "This workspace uses files on another computer",
-        detail: `It points to files on ${hosts.join(", ")}. Reading them makes Windows connect to that computer. Only continue if you trust where this workspace came from.`,
+        detail: `It points to files on ${hosts.join(", ")}. Reading them makes this computer connect to that one. Only continue if you trust where this workspace came from.`,
       });
       allowRemote = r.response === 0;
     }
@@ -732,6 +770,67 @@ function registerIpc() {
     await walk(folderPath);
     if (total > MAX_OPEN_BYTES) return { ok: false, error: "too-large" };
     return { ok: true, files };
+  });
+
+  // Camera-style screenshots (owner, 5 Nov): saved straight to Pictures/MRLatte
+  // without a dialog, so the renderer can offer Open / Show in folder. Only a
+  // path this handler wrote can be opened or revealed: the renderer never gets
+  // to name an arbitrary file for the shell.
+  const screenshotPaths = new Set();
+  // Recent scans for the home screen (owner, 5 Nov): kept by MAIN in
+  // userData/recent.json, with a small thumbnail each (owner agreed to store
+  // them). Only absolute .nii / .nii.gz paths are accepted, and openRecent
+  // grants read access (allowedOpenPaths) only to a path in this list, so the
+  // renderer still can't read an arbitrary file. Clear recent empties it.
+  const RECENT_MAX = 10;
+  const recentFile = () => path.join(app.getPath("userData"), "recent.json");
+  const loadRecent = () => {
+    try {
+      const v = JSON.parse(fs.readFileSync(recentFile(), "utf8"));
+      return Array.isArray(v) ? v.filter((r) => r && typeof r.path === "string") : [];
+    } catch (_e) {
+      return [];
+    }
+  };
+  const saveRecent = (list) => {
+    try { fs.writeFileSync(recentFile(), JSON.stringify(list)); } catch (_e) { /* best effort */ }
+  };
+  ipcMain.handle("mrlatte:getRecent", () =>
+    loadRecent().map((r) => ({ ...r, missing: !fs.existsSync(r.path) })));
+  ipcMain.handle("mrlatte:addRecent", (_e, { filePath, name, thumb }) => {
+    if (typeof filePath !== "string" || !path.isAbsolute(filePath) || !/\.(nii|mif)(\.gz)?$/i.test(filePath)) return false;
+    const okThumb = typeof thumb === "string" && thumb.startsWith("data:image/jpeg;base64,") && thumb.length < 80000;
+    const prev = loadRecent().find((r) => r.path === filePath);
+    const entry = {
+      path: filePath,
+      name: String(name || path.basename(filePath)).slice(0, 120),
+      thumb: okThumb ? thumb : prev?.thumb || null,
+      openedAt: Date.now(),
+    };
+    saveRecent([entry, ...loadRecent().filter((r) => r.path !== filePath)].slice(0, RECENT_MAX));
+    return true;
+  });
+  ipcMain.handle("mrlatte:openRecent", (_e, filePath) => {
+    if (!loadRecent().some((r) => r.path === filePath) || !fs.existsSync(filePath)) return { ok: false };
+    allowedOpenPaths.add(filePath);
+    return { ok: true };
+  });
+  ipcMain.handle("mrlatte:clearRecent", () => { saveRecent([]); return true; });
+
+  ipcMain.handle("mrlatte:saveScreenshot", async (_e, { base64 }) => {
+    const dir = path.join(app.getPath("pictures"), "MRLatte");
+    await fs.promises.mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 23);
+    const filePath = path.join(dir, `mrlatte-${stamp}.png`);
+    await fs.promises.writeFile(filePath, Buffer.from(base64, "base64"));
+    screenshotPaths.add(filePath);
+    return { filePath };
+  });
+  ipcMain.handle("mrlatte:revealScreenshot", async (_e, { filePath, open }) => {
+    if (!screenshotPaths.has(filePath)) return false;
+    if (open) await shell.openPath(filePath);
+    else shell.showItemInFolder(filePath);
+    return true;
   });
 
   ipcMain.handle("mrlatte:saveFile", async (e, { defaultName, base64 }) => {
@@ -807,11 +906,50 @@ function registerIpc() {
   // The app's own light/dark choice → the native chrome (menus, title bar) and
   // the CSS prefers-color-scheme query that nativeTheme.themeSource drives.
   // Remembered across runs so the first loading page already follows it.
+  // Preferences ▸ Transparency (hooks/useWindowLook.js): the OS material behind
+  // a transparent page. Windows 11 acrylic, macOS vibrancy; elsewhere (Windows
+  // 10, Linux) there is none and the window stays as it is. Off restores the
+  // opaque background the window was created with.
+  ipcMain.on("mrlatte:setWindowMaterial", (e, on) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win.isDestroyed()) return;
+    try {
+      if (process.platform === "win32" && typeof win.setBackgroundMaterial === "function") {
+        win.setBackgroundColor(on ? "#00000000" : "#050505");
+        win.setBackgroundMaterial(on ? "acrylic" : "none");
+      } else if (process.platform === "darwin") {
+        win.setBackgroundColor(on ? "#00000000" : "#050505");
+        win.setVibrancy(on ? "under-window" : null);
+      }
+    } catch (err) {
+      console.warn("[electron] window material:", err && err.message);
+    }
+  });
+
+  // A see-through window (the material above) repaints late on Windows: what
+  // the page removes can stay on screen until something nearby redraws (a
+  // shortcut hint's key badge stayed until the mouse crossed the sidebar).
+  // The page asks for a full repaint after such a change.
+  ipcMain.on("mrlatte:repaint", (e) => {
+    try { e.sender.invalidate(); } catch (_e) { /* best effort */ }
+  });
+
   ipcMain.on("mrlatte:setAppearance", (_e, mode) => {
     if (!APPEARANCE_MODES.includes(mode)) return;
     nativeTheme.themeSource = mode;
     saveAppearance(mode);
     applyMenuState({ appearance: mode });
+    refreshTitleBarOverlays();
+  });
+
+  // The title bar's "MRLatte" button pops up the application menu under it.
+  // The renderer only says where (numbers); it can't name a menu or an action.
+  ipcMain.on("mrlatte:popupAppMenu", (e, pos) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const menu = Menu.getApplicationMenu();
+    if (!win || win.isDestroyed() || !menu) return;
+    const n = (v, max) => (Number.isFinite(v) ? Math.max(0, Math.min(Math.round(v), max)) : 0);
+    menu.popup({ window: win, x: n(pos && pos.x, 4000), y: n(pos && pos.y, 4000) });
   });
 
   // The only place main reads raw binary bytes for the renderer. Never widen
@@ -833,8 +971,39 @@ function registerIpc() {
 // --------------------------------------------------------------------------- //
 // Window
 // --------------------------------------------------------------------------- //
+// MRLatte's own one-row title bar (components/AppTitleBar.jsx, 40px) replaces
+// the system title bar and the menu row. Windows and Linux keep the native
+// minimise / maximise / close (so Windows 11 snap layouts work) as an overlay
+// drawn in the bar's colours; macOS keeps its traffic lights, inset, and the
+// menu at the top of the screen.
+const TITLEBAR_HEIGHT = 40;
+const OVERLAY_COLOURS = {
+  dark: { color: "#181715", symbolColor: "#BDB6AB" },
+  light: { color: "#FAF8F4", symbolColor: "#57524A" },
+};
+const hasOverlayBar = () => process.platform === "win32" || process.platform === "linux";
+function overlayOptions() {
+  const c = OVERLAY_COLOURS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
+  return { color: c.color, symbolColor: c.symbolColor, height: TITLEBAR_HEIGHT };
+}
+function titleBarOptions() {
+  if (process.platform === "darwin") return { titleBarStyle: "hiddenInset" };
+  return { titleBarStyle: "hidden", titleBarOverlay: overlayOptions() };
+}
+// Called when the app's light / dark choice changes (mrlatte:setAppearance).
+function refreshTitleBarOverlays() {
+  if (!hasOverlayBar()) return;
+  for (const w of windows) {
+    if (w.isDestroyed() || typeof w.setTitleBarOverlay !== "function") continue;
+    try { w.setTitleBarOverlay(overlayOptions()); } catch (_e) { /* a window without the overlay */ }
+  }
+}
+// "System" look follows the OS, so the bar's colours must follow it too.
+nativeTheme.on("updated", refreshTitleBarOverlays);
+
 function createMainWindow(openFilePath) {
   const win = new BrowserWindow({
+    ...titleBarOptions(),
     width: 1600,
     height: 1000,
     // Lowered from 1200x720 so the window can be parked small beside another
@@ -857,6 +1026,8 @@ function createMainWindow(openFilePath) {
 
   windows.add(win);
   lastFocusedWindow = win;
+  // The menu moves to the title bar's "MRLatte" button; its shortcuts still work.
+  if (hasOverlayBar()) win.setMenuBarVisibility(false);
 
   // Captured now, while webContents is still alive — reading win.webContents
   // (or .id off it) from inside the "closed" handler below throws "Object
@@ -873,6 +1044,22 @@ function createMainWindow(openFilePath) {
   win.on("focus", () => {
     lastFocusedWindow = win;
   });
+  // Resizing a see-through window left stale strips of the old layout
+  // (sidebar edges) on Windows: repaint the whole page once the size settles,
+  // and on every step while dragging (coalesced to one per frame).
+  let repaintQueued = false;
+  const repaintAll = () => {
+    if (repaintQueued || win.isDestroyed()) return;
+    repaintQueued = true;
+    setTimeout(() => {
+      repaintQueued = false;
+      if (!win.isDestroyed()) try { win.webContents.invalidate(); } catch (_e) { /* best effort */ }
+    }, 16);
+  };
+  win.on("resize", repaintAll);
+  win.on("resized", repaintAll);
+  win.on("maximize", repaintAll);
+  win.on("unmaximize", repaintAll);
 
   win.on("closed", () => {
     windows.delete(win);
@@ -1089,6 +1276,7 @@ function buildMenu() {
         cmd({ id: "open-workspace", label: "Open workspace…", accelerator: "CmdOrCtrl+O" }),
         cmd({ id: "save-workspace", label: "Save workspace…", accelerator: "CmdOrCtrl+S" }),
         cmd({ id: "screenshot", label: "Screenshot", ...keyHint("S") }),
+        cmd({ id: "preferences", label: "Preferences…", accelerator: "CmdOrCtrl+," }),
         { type: "separator" },
         { label: "Reload", accelerator: "CmdOrCtrl+R", click: () => focusedOrLastWindow()?.webContents.reload() },
         { type: "separator" },
@@ -1114,7 +1302,7 @@ function buildMenu() {
     {
       label: "View",
       submenu: [
-        cmd({ id: "view-multiplanar", label: "MPR + 3D" }),
+        cmd({ id: "view-multiplanar", label: "Multiplanar + 3D" }),
         cmd({ id: "view-render", label: "3D" }),
         cmd({ id: "view-axial", label: "Axial", ...keyHint("1") }),
         cmd({ id: "view-coronal", label: "Coronal", ...keyHint("2") }),
@@ -1241,12 +1429,91 @@ if (headerOnlyPath) {
     }
   });
 
+  // macOS: Finder (double-click, Open With, a file dropped on the Dock icon)
+  // hands files over as 'open-file' events, never on argv, and the first can
+  // fire before 'ready' on a cold start. Each goes through the same checks as
+  // an argv path, by way of an argv-shaped array; those that arrive before
+  // ready wait for the whenReady handler below.
+  const earlyOpenFiles = [];
+  const finderArgv = (p) => [process.argv[0], ...(process.defaultApp ? [process.argv[1]] : []), p];
+  const refusedBox = (refused) => ({
+    type: "error", title: "MRLatte", message: "MRLatte can't open this file",
+    detail: `${refused.reason}\n\n${OPENABLE_HINT}`,
+  });
+  app.on("open-file", async (event, filePath) => {
+    event.preventDefault();
+    if (!app.isReady()) {
+      earlyOpenFiles.push(filePath);
+      return;
+    }
+    const argv = finderArgv(filePath);
+    const refused = await refusedOpenFromArgv(argv);
+    const p = refused ? null : niftiPathFromArgv(argv);
+    logQuickOpen(`open-file path=${filePath} resolvedPath=${describeOpen(p)} refused=${!!refused} backendReady=${backendReady}`);
+    if (p) {
+      openFile(p);
+      return;
+    }
+    const win = focusedOrLastWindow() || [...windows][0];
+    if (refused) {
+      if (win) dialog.showMessageBox(win, refusedBox(refused));
+      else dialog.showMessageBox(refusedBox(refused));
+    }
+  });
+
+  // The Intel build on an Apple Silicon Mac runs through Rosetta: every part of
+  // MRLatte (window, backend, dcm2niix, analyses) is translated and much
+  // slower. Say so once, with the build to install instead, until the user
+  // ticks "Don't show this again" (a flag in userData).
+  function warnIfIntelBuildOnAppleSilicon() {
+    if (process.platform !== "darwin" || !app.runningUnderARM64Translation) return;
+    const flag = path.join(app.getPath("userData"), "rosetta-warning-dismissed");
+    if (fs.existsSync(flag)) return;
+    setTimeout(async () => {
+      const win = BrowserWindow.getAllWindows()[0];
+      const opts = {
+        type: "warning",
+        title: "MRLatte",
+        message: "This is the Intel version of MRLatte, on an Apple Silicon Mac",
+        detail: "It runs through Rosetta, so everything (loading scans, DICOM import, analyses) is "
+          + "much slower. Install the Apple Silicon version instead: "
+          + `MRLatte-${app.getVersion()}-mac-arm64.dmg.`,
+        checkboxLabel: "Don't show this again",
+        buttons: ["OK"],
+      };
+      const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+      if (r.checkboxChecked) {
+        try { fs.writeFileSync(flag, app.getVersion()); } catch { /* shown again next time */ }
+      }
+    }, 3000);
+  }
+
   app.whenReady().then(async () => {
     // A file MRLatte can't open fails here, before the loading page, saying why.
     const refused = await refusedOpenFromArgv(process.argv);
     if (refused) {
       logQuickOpen(`cold-start refused path=${refused.path}`);
       dialog.showMessageBoxSync({ type: "error", title: "MRLatte", message: "MRLatte can't open this file", detail: `${refused.reason}\n\n${OPENABLE_HINT}` });
+      app.quit();
+      return;
+    }
+    // Finder files that arrived before ready (macOS), checked the same way. As
+    // with argv, a launch that was only for files MRLatte can't open ends here.
+    const finderPaths = [];
+    let finderRefused = false;
+    for (const f of earlyOpenFiles.splice(0)) {
+      const argv = finderArgv(f);
+      const r = await refusedOpenFromArgv(argv);
+      if (r) {
+        finderRefused = true;
+        logQuickOpen(`cold-start open-file refused path=${r.path}`);
+        dialog.showMessageBoxSync(refusedBox(r));
+        continue;
+      }
+      const p = niftiPathFromArgv(argv);
+      if (p) finderPaths.push(p);
+    }
+    if (finderRefused && finderPaths.length === 0 && !resolveOpenPathFromArgv(process.argv) && !earlyOpenUrlPath) {
       app.quit();
       return;
     }
@@ -1276,15 +1543,20 @@ if (headerOnlyPath) {
       // Dev mode doesn't spawn a backend from here (the developer runs it
       // themselves), so it's "ready" for a second-instance open immediately.
       backendReady = true;
-      const openPath = resolveOpenPathFromArgv(process.argv) || earlyOpenUrlPath;
+      const openPath = resolveOpenPathFromArgv(process.argv) || earlyOpenUrlPath || finderPaths.shift();
       const win = createMainWindow(openPath);
       win.loadURL("http://localhost:3000/#/");
       win.webContents.openDevTools({ mode: "detach" });
+      for (const p of finderPaths) openNewWindow(p);
     } else {
-      const openPath = resolveOpenPathFromArgv(process.argv) || earlyOpenUrlPath;
+      const openPath = resolveOpenPathFromArgv(process.argv) || earlyOpenUrlPath || finderPaths.shift();
       logQuickOpen(`cold-start argv=${JSON.stringify(process.argv)} earlyOpenUrlPath=${describeOpen(earlyOpenUrlPath)} resolvedPath=${describeOpen(openPath)}`);
+      // Any further Finder files open in windows of their own once the backend
+      // is up, like files that arrive during the boot (pendingBoot).
+      pendingBoot.push(...finderPaths);
       // Before the first page load, so a stale cached UI can never be shown.
       clearCachesIfVersionChanged().then(() => bootFirstWindow(openPath));
+      warnIfIntelBuildOnAppleSilicon();
     }
 
     app.on("activate", () => {
@@ -1302,12 +1574,50 @@ if (headerOnlyPath) {
   });
 
   // Ensure the backing services are always torn down with the app.
+  let quitWatchdog = false;
+  // A quit must always finish: a renderer that is busy or unresponsive (a
+  // software-GL runner, a stuck page) would otherwise hold the app open after
+  // "Quit", with the backend already stopped. Logged, so a slow quit is visible.
+  app.on("before-quit", () => {
+    console.log("[electron] before-quit; windows:", BrowserWindow.getAllWindows().length);
+    // Close every window now instead of asking each page first. A plain close
+    // waits on the page, and a page busy drawing (software GL on an Intel Mac
+    // runner) held the app open after Quit for 20 s and more. Nothing in the
+    // page needs an unload step: settings are written as they change.
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.destroy(); } catch (_e) { /* already gone */ }
+    }
+    // Backstop. Not unref'd: an unref'd timer is the one thing that may not
+    // fire once nothing else keeps the main loop awake.
+    setTimeout(() => {
+      console.warn("[electron] quit still pending after 8 s; exiting");
+      app.exit(0);
+    }, 8000);
+    // And one outside the app: on an Intel Mac runner the timer above never
+    // fired (the main thread was stuck in Electron's native shutdown), so a
+    // separate shell ends the app if it is still there 12 s after Quit.
+    if (!quitWatchdog && process.platform !== "win32") {
+      quitWatchdog = true;
+      try {
+        // Only if that pid is still this program (Linux truncates names to 15).
+        const name = path.basename(process.execPath).slice(0, 15).replace(/'/g, "");
+        spawn("/bin/sh", ["-c", `sleep 12; ps -p ${process.pid} -o comm= | grep -qF '${name}' && kill -9 ${process.pid}`], {
+          detached: true, stdio: "ignore",
+        }).unref();
+      } catch (_e) { /* best effort */ }
+    }
+  });
+  app.on("will-quit", () => console.log("[electron] will-quit"));
   app.on("before-quit", stopServices);
   app.on("will-quit", stopServices);
   process.on("exit", stopServices);
 
   app.on("window-all-closed", () => {
+    // macOS keeps the app running with no window, so the backend must stay up
+    // too: the Dock icon's 'activate' opens a new window against it
+    // (openNewWindow). Quitting stops it (before-quit / will-quit).
+    if (process.platform === "darwin") return;
     stopServices();
-    if (process.platform !== "darwin") app.quit();
+    app.quit();
   });
 }

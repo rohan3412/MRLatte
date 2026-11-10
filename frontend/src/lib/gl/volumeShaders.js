@@ -126,6 +126,7 @@ uniform highp sampler2D colormap;
 uniform vec2 renderDrawAmbientOcclusionXY;
 uniform highp sampler3D overlayClipExempt;
 uniform float overlayOcclusion;
+uniform float stepScale;
 in vec3 vColor;
 out vec4 fColor;
 `;
@@ -249,7 +250,9 @@ const K_RENDER_INIT = `void main() {
 		return;
 	}
 	float sliceSize = len / lenVox; //e.g. if ray length is 1.0 and traverses 50 voxels, each voxel is 0.02 in unit cube
-	float stepSize = sliceSize; //quality: larger step is faster traversal, but fewer samples
+	// stepScale: coarser steps while the view is moving. opacityCorrection below
+	// already compensates; an unset uniform is 0, so max() keeps today's step.
+	float stepSize = sliceSize * max(stepScale, 1.0); //quality: larger step is faster traversal, but fewer samples
 	float opacityCorrection = stepSize/sliceSize;
 	vec4 deltaDir = vec4(dir.xyz * stepSize, stepSize);
 	vec4 samplePos = vec4(start.xyz, 0.0); //ray position

@@ -2,7 +2,7 @@ import { toast } from "sonner";
 import { NVImage, NVUtilities, PEN_TYPE } from "@niivue/niivue";
 import { interpolateSlices } from "@/lib/drawInterpolate";
 import { rleEncode, rleDecode, hasAnyNonZero, sameBytes } from "@/lib/drawHistory";
-import { harmonizeQformWithSform } from "@/lib/niftiHeader";
+import { harmonizeQformWithSform, setNiftiAffine } from "@/lib/niftiHeader";
 import { transformLabels, mat4ToRows } from "@/lib/drawTransform";
 import { visiblePivot, pivotSignature } from "@/lib/layerPivot";
 import { normalizeTransform, isIdentityTransform, IDENTITY_TRANSFORM } from "@/lib/overlayTransform";
@@ -130,6 +130,9 @@ export function createDrawingApi(ctx, {
         dimsRAS: base.dimsRAS,
         matRAS: base.matRAS,
         hdr: base.hdr,
+        // The bitmap is in NiiVue's RAS frame (dimsRAS/matRAS), not the
+        // file's voxel order: lib/volumeAnalysis.js voxelGrid.
+        rasOrder: true,
       };
     },
     // Shape-morph fill/void-carve of every slice between the last two
@@ -180,7 +183,7 @@ export function createDrawingApi(ctx, {
         });
         return false;
       }
-      drawHistory.current.push(preSnapshot);
+      drawHistory.current.push(preSnapshot, "Interpolate slices");
       emitHistory();
       try { nv.refreshDrawing(true); } catch (_e) { /* redraw is best-effort */ }
       if (result.filled > 0) {
@@ -265,7 +268,7 @@ export function createDrawingApi(ctx, {
         }
       }
       if (mutated) {
-        drawHistory.current.push(preSnapshot);
+        drawHistory.current.push(preSnapshot, "Interpolate all");
         emitHistory();
         try { nv.refreshDrawing(true); } catch (_e) { /* redraw is best-effort */ }
       }
@@ -391,7 +394,7 @@ export function createDrawingApi(ctx, {
           });
           return false;
         }
-        drawHistory.current.push(preSnapshot);
+        drawHistory.current.push(preSnapshot, "Load mask into drawing");
         lastDraws.current = [];
         emitHistory();
         nv.setDrawingEnabled(true);
@@ -434,7 +437,7 @@ export function createDrawingApi(ctx, {
         if (mask[i] && after[i]) { after[i] = 0; n += 1; }
       }
       nv.drawBitmap.set(after);
-      if (n > 0) drawHistory.current.push(rleEncode(before));
+      if (n > 0) drawHistory.current.push(rleEncode(before), "Quality-check fix");
       try { nv.refreshDrawing(true); } catch (_e) {}
       emitHistory();
       return n;
@@ -471,7 +474,7 @@ export function createDrawingApi(ctx, {
       st.transform = t;
       try { nv.refreshDrawing(true); } catch (_e) {}
       if (!live) {
-        if (!sameBytes(st.gestureStart, out)) drawHistory.current.push(rleEncode(st.gestureStart));
+        if (!sameBytes(st.gestureStart, out)) drawHistory.current.push(rleEncode(st.gestureStart), "Move / turn / resize");
         st.gestureStart = null;
         emitHistory();
       }
@@ -508,7 +511,7 @@ export function createDrawingApi(ctx, {
       if (!nv) return;
       try {
         if (!nv.drawBitmap) return;
-        snapshotForUndo(); // clear is undoable
+        snapshotForUndo("Clear drawing"); // clear is undoable
         nv.drawBitmap.fill(0);
         nv.refreshDrawing(true);
         emitHistory();
@@ -569,6 +572,12 @@ export function createDrawingApi(ctx, {
         // qform disagrees with its sform by ~150 mm — so make them agree before
         // the drawing leaves the app (see lib/niftiHeader.js).
         harmonizeQformWithSform(bytes);
+        // A base that was moved by hand (volumeApi.setBaseTransform): the
+        // drawing sits on its grid, so it must leave with the adjusted
+        // position in sform, qform AND voxel size — niivue only rewrites the
+        // sform rows.
+        const base = nv.volumes?.[0];
+        if (base?.__manuallyAdjusted) setNiftiAffine(bytes, base.getAffine());
         const compressed = await NVUtilities.compress(bytes, "gzip");
         return new Uint8Array(compressed);
       } catch (err) {
@@ -628,7 +637,7 @@ export function createDrawingApi(ctx, {
       const out = new Uint8Array(src.length);
       const nb6 = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
 
-      snapshotForUndo(); emitHistory(); // morphology op is undoable
+      snapshotForUndo(op[0].toUpperCase() + op.slice(1)); emitHistory(); // morphology op is undoable
 
       if (op === "dilate") {
         out.set(src);
@@ -717,7 +726,7 @@ export function createDrawingApi(ctx, {
       // backs the true-3D Brush tool and right-drag erase (labelValue 0)
       // — see stampSphereAlongPath.
       const lab = Math.max(1, Math.min(255, Math.round(labelValue) || 1));
-      snapshotForUndo(); // sphere is undoable, mirrors a freehand stroke
+      snapshotForUndo("Sphere"); // sphere is undoable, mirrors a freehand stroke
       const painted = rasterizeSphere(centerMM, r, lab);
       if (!painted) { toast.error("Sphere fell outside the volume."); return false; }
       try { nv.refreshDrawing(true); } catch (_e) { /* redraw is best-effort */ }

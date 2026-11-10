@@ -195,7 +195,7 @@ export const MeasurePanel = ({
   };
 
   const maskOptions = [
-    ...lesionLayers.map((l) => ({ id: l.id, name: l.name })),
+    ...lesionLayers.map((l) => ({ id: l.id, name: `${l.name} (lesion)` })),
     ...roiLayers.map((l) => ({ id: l.id, name: l.name })),
     { id: "__drawing__", name: "Current drawing" },
   ];
@@ -251,16 +251,18 @@ export const MeasurePanel = ({
 
       {/* Measurements list */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 cap text-subtle">
-            <Ruler size={11} /> measurements
+        <div className="fit-row flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 cap text-subtle">
+            <Ruler size={11} className="shrink-0" /> <span className="truncate">measurements</span>
           </div>
-          <div className="flex items-center gap-1">
-            <button className={btn} onClick={() => addMeasurement("distance")} data-testid="add-distance">
-              <Plus size={11} /> Dist
+          <div className="flex shrink-0 items-center gap-1">
+            <button className={btn} onClick={() => addMeasurement("distance")} data-testid="add-distance"
+              title="Add a distance (2 points)" aria-label="Add a distance">
+              <Plus size={11} /> <span className="fit-full">Dist</span>
             </button>
-            <button className={btn} onClick={() => addMeasurement("angle")} data-testid="add-angle">
-              <Triangle size={11} /> Angle
+            <button className={btn} onClick={() => addMeasurement("angle")} data-testid="add-angle"
+              title="Add an angle (3 points)" aria-label="Add an angle">
+              <Triangle size={11} /> <span className="fit-full">Angle</span>
             </button>
           </div>
         </div>
@@ -280,7 +282,7 @@ export const MeasurePanel = ({
                 className="flex-1 min-w-0 bg-transparent text-[12px] text-foreground focus:outline-none"
                 data-testid={`measurement-name-${m.id}`} />
               <span className="font-mono text-[12px] text-foreground tabular-nums flex-shrink-0">{measureValue(m)}</span>
-              <button onClick={() => removeMeasurement(m.id)}
+              <button onClick={() => removeMeasurement(m.id)} aria-label="Remove measurement" title="Remove measurement"
                 className="text-muted-foreground hover:text-destructive flex-shrink-0" data-testid={`measurement-remove-${m.id}`}>
                 <Trash2 size={12} />
               </button>
@@ -323,9 +325,9 @@ export const MeasurePanel = ({
                 <button onClick={() => setExpandedPin(isOpen ? null : p.id)}
                   className="font-mono text-[10.5px] text-muted-foreground hover:text-foreground flex-shrink-0"
                   data-testid={`pin-toggle-${p.id}`}>
-                  {isOpen ? "hide" : "values"}
+                  {isOpen ? "Hide" : "Values"}
                 </button>
-                <button onClick={() => removePin(p.id)}
+                <button onClick={() => removePin(p.id)} aria-label="Remove pin" title="Remove pin"
                   className="text-muted-foreground hover:text-destructive flex-shrink-0" data-testid={`pin-remove-${p.id}`}>
                   <Trash2 size={12} />
                 </button>
@@ -372,7 +374,7 @@ export const MeasurePanel = ({
         {diam && (
           <div className="font-mono text-[11px] text-muted-foreground">
             diameter: <span className="text-foreground">{diam.diameterMM.toFixed(1)} mm</span>
-            <span className="text-subtle"> · {diam.voxelCount} vox</span>
+            <span className="text-subtle"> · {diam.voxelCount.toLocaleString()} vox</span>
           </div>
         )}
       </div>
@@ -397,7 +399,7 @@ export const MeasurePanel = ({
           )}
         </div>
         <div className="text-[12px] text-subtle leading-relaxed">
-          place crosshair on a structure expected at the midline (MNI x≈0).
+          Place the crosshair on a structure expected at the midline (MNI x≈0).
         </div>
       </div>
 

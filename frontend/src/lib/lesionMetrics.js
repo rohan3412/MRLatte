@@ -37,6 +37,12 @@ let _capabilitiesPromise = null;
 // link wherever MRLatte credits it).
 export const lqtpyReleaseUrl = (version) => `https://github.com/rohan3412/LQTpy/releases/tag/v${version}`;
 
+/** Drop the cached capabilities: the LQTpy module may just have been installed
+ *  or removed (ModuleProvider calls this whenever module state is re-read). */
+export function forgetCapabilities() {
+  _capabilitiesPromise = null;
+}
+
 export function getCapabilities({ forceRefresh = false } = {}) {
   if (forceRefresh || !_capabilitiesPromise) {
     _capabilitiesPromise = (async () => {

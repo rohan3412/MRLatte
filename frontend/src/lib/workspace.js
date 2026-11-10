@@ -12,11 +12,12 @@
 
 // v5 adds userLayers[].transform (manual move / rotate / scale); v6 adds the
 // base volume itself, and files saved as links (path + size instead of a copy;
-// a DICOM base as its source folder or zip, converted again on open). Dashboard
+// a DICOM base as its source folder or zip, converted again on open); v7 adds
+// view.baseTransform (the base moved by hand; 0.5.0 would drop it silently). Dashboard
 // stamps the LOWEST version that can hold what the workspace contains, so a
 // workspace without a custom base or adjusted layer still opens in older
 // versions — and one with them is refused there instead of opening wrong.
-export const WORKSPACE_VERSION = 6;
+export const WORKSPACE_VERSION = 7;
 
 export const WORKSPACE_EXT = ".mrlatte";
 /** Names MRLatte opens as a workspace (current and pre-0.5.0). */

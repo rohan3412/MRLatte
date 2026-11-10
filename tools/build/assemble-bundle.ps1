@@ -11,6 +11,7 @@
           python\        (embeddable Python 3.11 + site-packages\)
           python-reports\      (OPTIONAL, -Full only: requirements-reports.txt)
           python-validation\   (OPTIONAL, -Full only: requirements-validation.txt)
+          python-scipy\  python-lqtpy\   (OPTIONAL, -Full only, --no-deps)
           backend\       (server.py + worker .py files)
           frontend_build\(built React app; NO atlases - see modules\)
           dcm2niix\      (dcm2niix.exe)
@@ -28,9 +29,8 @@
     dist:win` (or `dist:win:full` after `-Full`) to produce the installer.
 
 .NOTES
-    Requires: internet, a full Python 3.11 (`py -3.11`), Node + yarn, and `git`
-    on PATH (requirements-frozen.txt pins lqtpy via a git+https URL, and pip
-    shells out to git to fetch it even for `pip install --target`).
+    Requires: internet, a full Python 3.11 (`py -3.11`), Node + yarn. (lqtpy is
+    a release wheel fetched over HTTPS, -Full only: requirements-lqtpy.txt.)
     Downloads are cached in tools\build\downloads\ so re-runs are fast.
 #>
 [CmdletBinding()]
@@ -50,11 +50,21 @@ param(
     # Also stage the optional python-reports\ and python-validation\ dependency
     # sets (each in its own dir under the bundle) so the installer can offer them
     # as opt-in components. Without -Full, the bundle is core-only.
-    [switch]$Full
+    [switch]$Full,
+
+    # The viewer-only bundle: Python with just the server and its module store
+    # (requirements-core.txt), no numpy/nibabel/SciPy/lqtpy and no bundled data
+    # modules. Everything else installs from the module store. See build-viewer.bat.
+    # Each flavour packages with its electron-builder overlay (JS configs built on
+    # package.json's own build section): -Full with tools/build/electron-full.js
+    # (yarn dist:win:full, adds the python-* stacks), -Viewer with
+    # tools/build/electron-viewer.js (yarn dist:win:viewer, names the installer).
+    [switch]$Viewer
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($Viewer -and $Full) { throw "-Viewer and -Full are opposites: pass one of them" }
 
 # --- Resolve repo-relative paths (this script lives in <repo>\tools\build\) ---
 $RepoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -135,11 +145,8 @@ if ($pthFile) {
 Write-Step "2/5  Installing backend dependencies into site-packages (this is slow)"
 $sitePkgs = Join-Path $pyDir "site-packages"
 New-Item -ItemType Directory -Force -Path $sitePkgs | Out-Null
-$reqFile = Join-Path $RepoRoot "backend\requirements-frozen.txt"
-# requirements-frozen.txt pins lqtpy via a git+https URL (VCS requirement) -
-# pip needs `git` on PATH to resolve it, same as any other pip install of a
-# git URL. Not checked in Preflight above; add a Require-Tool "git" call there
-# if a build machine ever lacks it.
+# -Viewer: the server and its module store only (requirements-core.txt).
+$reqFile = Join-Path $RepoRoot $(if ($Viewer) { "backend\requirements-core.txt" } else { "backend\requirements-frozen.txt" })
 & py -3.11 -m pip install --target "$sitePkgs" -r "$reqFile" --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { throw "pip install failed (exit $LASTEXITCODE)" }
 Write-Ok "dependencies installed"
@@ -177,8 +184,19 @@ if ($Full) {
     & py -3.11 -m pip install --target "$dissectionDir" -r "$dissectionReq" --no-warn-script-location
     if ($LASTEXITCODE -ne 0) { throw "pip install (dissection) failed (exit $LASTEXITCODE)" }
     Write-Ok "python-dissection installed"
+
+    # SciPy and lqtpy (modules since 0.6.0). --no-deps: numpy and nibabel are in
+    # the core site-packages, and a second numpy here would shadow it.
+    foreach ($stack in @("scipy", "lqtpy")) {
+        $stackReq = Join-Path $RepoRoot "backendequirements-$stack.txt"
+        $stackDir = Join-Path $BundleDir "python-$stack"
+        New-Item -ItemType Directory -Force -Path $stackDir | Out-Null
+        & py -3.11 -m pip install --target "$stackDir" -r "$stackReq" --no-deps --no-warn-script-location
+        if ($LASTEXITCODE -ne 0) { throw "pip install ($stack) failed (exit $LASTEXITCODE)" }
+        Write-Ok "python-$stack installed"
+    }
 } else {
-    Write-Ok "optional stacks skipped (pass -Full to include python-reports / python-validation / python-longitudinal / python-dissection)"
+    Write-Ok "optional stacks skipped (pass -Full to include python-reports / python-validation / python-longitudinal / python-dissection / python-scipy / python-lqtpy)"
 }
 
 # Prune ballast that never runs in the shipped app: package test suites, byte-code
@@ -340,7 +358,8 @@ $modManifest = Get-Content -Raw -Encoding UTF8 $manifestSrc | ConvertFrom-Json
 $modIds = @(); $modCount = 0; $modBytes = 0
 foreach ($modEntry in $modManifest.modules) {
     $modType = if ($modEntry.type) { $modEntry.type } else { "data" }
-    if ($modType -ne "data" -or -not ($Full -or $modEntry.bundled)) { continue }
+    # -Viewer ships none: the template and the atlases install from the store.
+    if ($modType -ne "data" -or $Viewer -or -not ($Full -or $modEntry.bundled)) { continue }
     foreach ($modFile in $modEntry.files) {
         $modRel = Join-Path $modEntry.installTo $modFile.path
         $modSrc = Join-Path (Join-Path $RepoRoot "data\modules") $modRel

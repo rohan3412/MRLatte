@@ -118,6 +118,27 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Viewer-only build: numpy/nibabel (python-numpy), SciPy and lqtpy can all be
+# missing. A feature that needs one answers 503 and names the module to install,
+# instead of a bare 500 (core_packages.py). Other import errors are real bugs
+# and stay 500s.
+_MODULE_NAMES = {"python-numpy": "NumPy and NiBabel", "python-scipy": "SciPy", "lqtpy": "LQTpy"}
+
+
+@app.exception_handler(ModuleNotFoundError)
+async def _needs_a_module(request, exc):  # noqa: ANN001
+    from core_packages import PROVIDED_BY, missing_package
+    package = missing_package(exc)
+    if package is None:
+        raise exc
+    module_id = PROVIDED_BY[package]
+    # `detail` stays a sentence: every panel already shows a string detail as is.
+    return JSONResponse(status_code=503, content={
+        "detail": (f"This needs the {_MODULE_NAMES[module_id]} module, which is not installed. "
+                   "Install it from the module store."),
+        "error": "requires", "requires": [module_id], "package": package,
+    })
+
 api_router = APIRouter(prefix="/api")
 for _r in (status_router, modules_router, validation_router, dicom_router,
            longitudinal_router, tracts_router, lnm_router, summary_router,

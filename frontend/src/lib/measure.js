@@ -1,6 +1,6 @@
 // Lightweight clinical measurements on MNI-mm coordinates / NVImage volumes.
 
-import { getDims, mmToVox } from "@/lib/volumeAnalysis";
+import { getDims, mmToVox, sameVoxelGrid, voxToMM } from "@/lib/volumeAnalysis";
 
 export function distanceMM(a, b) {
   if (!a || !b) return null;
@@ -75,8 +75,8 @@ export function maskIntensityStats(maskVol, intensityVol) {
   const [inx, iny, inz] = idims;
   const mimg = maskVol.img;
   const iimg = intensityVol.img;
-  // Same-grid fast path: identical dims → index directly, skip mm round-trip.
-  const sameGrid = mnx === inx && mny === iny && mnz === inz;
+  // Same-grid fast path: the same grid (dims and affine) -> index directly.
+  const sameGrid = sameVoxelGrid(maskVol, intensityVol);
 
   let count = 0, sum = 0, sumSq = 0, min = Infinity, max = -Infinity;
   for (let k = 0; k < mnz; k++) {
@@ -87,7 +87,7 @@ export function maskIntensityStats(maskVol, intensityVol) {
         if (sameGrid) {
           v = iimg[i + inx * (j + iny * k)];
         } else {
-          const mm = voxToMM(maskVol.matRAS, i, j, k);
+          const mm = voxToMM(maskVol, [i, j, k]);
           const [vi, vj, vk] = mmToVox(intensityVol, mm).map((n) => Math.round(n));
           if (vi < 0 || vi >= inx || vj < 0 || vj >= iny || vk < 0 || vk >= inz) continue;
           v = iimg[vi + inx * (vj + iny * vk)];
@@ -107,13 +107,6 @@ export function maskIntensityStats(maskVol, intensityVol) {
   return { count, mean, min, max, sd: Math.sqrt(variance) };
 }
 
-function voxToMM(M, i, j, k) {
-  return [
-    M[0] * i + M[4] * j + M[8] * k + M[12],
-    M[1] * i + M[5] * j + M[9] * k + M[13],
-    M[2] * i + M[6] * j + M[10] * k + M[14],
-  ];
-}
 
 /**
  * Approximate maximum lesion diameter (mm) via PCA principal-axis extent.
@@ -126,27 +119,27 @@ export function lesionMaxDiameter(lesionVol) {
   if (!dims) return null;
   const [nx, ny, nz] = dims;
   const img = lesionVol.img;
-  const M = lesionVol.matRAS;
 
-  // Collect lesion voxel centres in mm (subsample if very large).
-  const pts = [];
+  // Every lesion voxel (its flat index). The axis comes from a sample of them
+  // when the lesion is very large; the count and the extent along the axis use
+  // all of them. (Sampling the whole grid instead counted only every 8th voxel
+  // of a lesion on a large grid, and shortened its extent.)
+  const idx = [];
   const total = nx * ny * nz;
-  const stride = total > 2_000_000 ? 2 : 1;
-  let cx = 0, cy = 0, cz = 0;
-  for (let k = 0; k < nz; k += stride) {
-    for (let j = 0; j < ny; j += stride) {
-      for (let i = 0; i < nx; i += stride) {
-        if (img[i + nx * (j + ny * k)] > 0) {
-          const p = voxToMM(M, i, j, k);
-          pts.push(p);
-          cx += p[0]; cy += p[1]; cz += p[2];
-        }
-      }
-    }
-  }
-  const n = pts.length;
+  for (let f = 0; f < total; f++) if (img[f] > 0) idx.push(f);
+  const n = idx.length;
   if (n < 2) return { diameterMM: 0, voxelCount: n };
-  cx /= n; cy /= n; cz /= n;
+  const at = (f) => voxToMM(lesionVol, [f % nx, Math.floor(f / nx) % ny, Math.floor(f / (nx * ny))]);
+  const step = Math.max(1, Math.ceil(n / 200_000));
+  const pts = [];
+  let cx = 0, cy = 0, cz = 0;
+  for (let q = 0; q < n; q += step) {
+    const p = at(idx[q]);
+    pts.push(p);
+    cx += p[0]; cy += p[1]; cz += p[2];
+  }
+  const m = pts.length;
+  cx /= m; cy /= m; cz /= m;
 
   // 3x3 covariance
   let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
@@ -155,7 +148,7 @@ export function lesionMaxDiameter(lesionVol) {
     xx += dx * dx; xy += dx * dy; xz += dx * dz;
     yy += dy * dy; yz += dy * dz; zz += dz * dz;
   }
-  xx /= n; xy /= n; xz /= n; yy /= n; yz /= n; zz /= n;
+  xx /= m; xy /= m; xz /= m; yy /= m; yz /= m; zz /= m;
 
   // Power iteration for the dominant eigenvector of the covariance matrix.
   let v = [1, 1, 1];
@@ -168,7 +161,8 @@ export function lesionMaxDiameter(lesionVol) {
   }
 
   let lo = Infinity, hi = -Infinity;
-  for (const p of pts) {
+  for (const f of idx) {
+    const p = at(f);
     const proj = (p[0] - cx) * v[0] + (p[1] - cy) * v[1] + (p[2] - cz) * v[2];
     if (proj < lo) lo = proj;
     if (proj > hi) hi = proj;

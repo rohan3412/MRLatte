@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "MRLatte — neuroimaging visualization dashboard",
   "author": "MRLatte",
@@ -17,9 +17,13 @@
     "electron:start": "concurrently -k \"craco start\" \"yarn electron:dev\"",
     "electron:build": "yarn build && yarn check:staged && electron-builder",
     "dist:win": "yarn build && yarn check:staged && electron-builder --win --x64",
-    "dist:win:full": "yarn build && yarn check:staged && electron-builder --win --x64 -c ../tools/build/electron-full.json",
+    "dist:win:full": "yarn build && yarn check:staged && electron-builder --win --x64 -c ../tools/build/electron-full.js",
+    "dist:win:viewer": "yarn build && yarn check:staged && electron-builder --win --x64 -c ../tools/build/electron-viewer.js",
     "dist:linux": "yarn build && yarn check:staged && electron-builder --linux --x64",
-    "dist:mac": "yarn build && yarn check:staged && electron-builder --mac --x64",
+    "dist:mac:arm64": "yarn build && yarn check:staged && electron-builder --mac --arm64",
+    "dist:mac:x64": "yarn build && yarn check:staged && electron-builder --mac --x64",
+    "dist:mac:arm64:viewer": "yarn build && yarn check:staged && electron-builder --mac --arm64 -c ../tools/build/electron-viewer.js",
+    "dist:mac:x64:viewer": "yarn build && yarn check:staged && electron-builder --mac --x64 -c ../tools/build/electron-viewer.js",
     "setup": "yarn install && node ../tools/scripts/modules.mjs add --core",
     "setup:full": "yarn install && node ../tools/scripts/modules.mjs add --all",
     "modules": "node ../tools/scripts/modules.mjs",
@@ -120,6 +124,7 @@
       }
     ],
     "asar": true,
+    "afterPack": "../tools/build/mac-adhoc-sign.js",
     "protocols": {
       "name": "MRLatte Deep Link",
       "schemes": [
@@ -145,7 +150,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MRLatte",
-      "installerIcon": "electron/build-resources/icon.ico",
+      "installerIcon": "electron/build-resources/installer.ico",
       "uninstallerIcon": "electron/build-resources/icon.ico"
     },
     "linux": {
@@ -160,7 +165,34 @@
         "dmg"
       ],
       "category": "public.app-category.healthcare-fitness",
-      "icon": "electron/build-resources/icon.icns"
+      "icon": "electron/build-resources/icon.icns",
+      "artifactName": "MRLatte-${version}-mac-${arch}.${ext}",
+      "minimumSystemVersion": "12.0",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "fileAssociations": [
+        {
+          "ext": "nii",
+          "name": "NIfTI Image",
+          "role": "Viewer"
+        },
+        {
+          "ext": "gz",
+          "name": "Compressed NIfTI Image (.nii.gz)",
+          "role": "Viewer",
+          "rank": "Alternate"
+        },
+        {
+          "ext": "mrlatte",
+          "name": "MRLatte Workspace",
+          "role": "Editor",
+          "rank": "Owner"
+        }
+      ]
+    },
+    "dmg": {
+      "icon": "electron/build-resources/installer.icns"
     },
     "electronLanguages": [
       "en-US"

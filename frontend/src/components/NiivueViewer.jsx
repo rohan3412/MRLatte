@@ -18,14 +18,18 @@ import { buildViewerContext } from "@/lib/viewer/context";
 import { createMeshApi } from "@/lib/viewer/meshApi";
 import { createNavigationApi } from "@/lib/viewer/navigation";
 import { createMarkersApi } from "@/lib/viewer/markers";
+import { createEffectsApi } from "@/lib/viewer/effects";
+import { getPref } from "@/lib/preferences";
 import { createLayoutApi } from "@/lib/viewer/layout";
 import { createVolumeApi } from "@/lib/viewer/volumeApi";
 import { createFrameApi } from "@/lib/viewer/frameApi";
 import { createScreenshotApi } from "@/lib/viewer/screenshot";
+import { createQualityController, LEVELS } from "@/lib/viewer/interactiveQuality";
 import { createSegmentationApi } from "@/lib/viewer/segmentation";
 import { createDrawingApi } from "@/lib/viewer/drawingApi";
 import { createPointerMath } from "@/lib/viewer/pointerMath";
 import { createZoomMath } from "@/lib/viewer/zoomMath";
+import { windowFromDrag } from "@/lib/windowDrag";
 
 // How long the active-tile highlight stays visible after the last interaction
 // before fading out (see tileHighlightVisible below).
@@ -34,10 +38,19 @@ const TILE_HIGHLIGHT_IDLE_MS = 2000;
 const CANVAS_BACK = { black: [0.02, 0.02, 0.02, 1], white: [1, 1, 1, 1] };
 
 const NiivueViewer = forwardRef(function NiivueViewer(
-  { baseVolume, sliceType = "multiplanar", activeOrientation = 0, onReady, onLocationChange, onError, onDoubleClickSlice, onClipRotateDelta, onFrameChange, clipEnabled = false, tractRender = DEFAULT_TRACT_RENDER, drawToolLabel = "", whiteBackground = false },
+  { baseVolume, sliceType = "multiplanar", activeOrientation = 0, onReady, onLocationChange, onError, onDoubleClickSlice, onClipRotateDelta, onWindowDrag, onFrameChange, clipEnabled = false, tractRender = DEFAULT_TRACT_RENDER, drawToolLabel = "", whiteBackground = false },
   ref
 ) {
   const canvasRef = useRef(null);
+  const fxLayerRef = useRef(null);
+  // Backing-store scale for the multi-view modes: 1, or less while the 3D view
+  // is moving and frames run slow (Preferences, "Faster 3D while moving", or
+  // Performance mode), as Blender does. Only ever below 1 in a 3D-only layout.
+  const renderScaleRef = useRef(1);
+  // Ends any "faster 3D while moving" interaction at once; set by the canvas
+  // effect, called before every capture.
+  const ensureStillRef = useRef(null);
+  const [previewBadge, setPreviewBadge] = useState(null); // {left,top} CSS px | null
   const nvRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
   // Stable refs to track volumes by our application id
@@ -91,6 +104,11 @@ const NiivueViewer = forwardRef(function NiivueViewer(
   // and the clip plane (right-drag) are now fully independent.
   const onClipRotateDeltaRef = useRef(onClipRotateDelta);
   React.useEffect(() => { onClipRotateDeltaRef.current = onClipRotateDelta; }, [onClipRotateDelta]);
+  // Right-drag windowing of the base: fires { phase: "start" | "move" | "end",
+  // lo, hi, level, width, gmin, gmax, startLevel, startWidth, clientX, clientY,
+  // fine } so Dashboard can show the readout and, at the end, sync the base card.
+  const onWindowDragRef = useRef(onWindowDrag);
+  React.useEffect(() => { onWindowDragRef.current = onWindowDrag; }, [onWindowDrag]);
   // Right-drag over the render tile only rotates the clip plane while the
   // plane is actually engaged; with it off, right-drag there does nothing.
   const clipEnabledRef = useRef(clipEnabled);
@@ -215,15 +233,17 @@ const NiivueViewer = forwardRef(function NiivueViewer(
 
   // Snapshot the current draw bitmap onto the undo stack (used before every
   // programmatic mutation: morph, interpolate, clear). No-op if nothing to snap.
-  const snapshotForUndo = () => {
+  const snapshotForUndo = (label) => {
     const nv = nvRef.current;
     if (!nv?.drawBitmap) return;
-    drawHistory.current.push(rleEncode(nv.drawBitmap));
+    drawHistory.current.push(rleEncode(nv.drawBitmap), label);
   };
   const emitHistory = () => {
     historyCb.current?.({
       canUndo: drawHistory.current.canUndo,
       canRedo: drawHistory.current.canRedo,
+      undoLabel: drawHistory.current.undoLabel,
+      redoLabel: drawHistory.current.redoLabel,
     });
     // Every path that mutates the draw bitmap already calls emitHistory (stroke
     // commit, undo/redo, interpolate, morph, clear, loadDrawingFromVolume), so
@@ -952,7 +972,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
           return;
         }
         emitInterpolateState();
-        drawHistory.current.push(pendingStrokeSnapshot.current);
+        drawHistory.current.push(pendingStrokeSnapshot.current, nv.opts.penValue === 0 ? "Erase stroke" : "Pen stroke");
         pendingStrokeSnapshot.current = null;
         emitHistory();
       } catch (_e) { /* recording is best-effort */ }
@@ -1229,7 +1249,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
       sphereToolStroke = null;
       try {
         if (snapshot && nv.drawBitmap && rleEncode(nv.drawBitmap) !== snapshot) {
-          drawHistory.current.push(snapshot); // one undo entry for the whole stroke
+          drawHistory.current.push(snapshot, "Brush stroke"); // one undo entry for the whole stroke
           emitHistory();
           // Brush strokes used to be invisible to Interpolate: only native
           // Pen/Cutout strokes were recorded, so drawing with the Brush and
@@ -1368,7 +1388,23 @@ const NiivueViewer = forwardRef(function NiivueViewer(
     // { lastX, lastY, live } while such a drag is in progress; live=false
     // means "clip plane off, swallow only".
     let clipRotate = null;
-    const RIGHT_DRAG_MODE_MAP = { zoom: DRAG_MODE.none, windowing: DRAG_MODE.windowing, pan: DRAG_MODE.pan };
+    // Right-drag windowing of the base (lib/windowDrag.js), handled here
+    // rather than by NiiVue's native windowing, whose fixed one-unit steps
+    // suit no real scan. { x0, y0, startLo, startHi, gmin, gmax } mid-drag.
+    let rightWindow = null;
+    const emitWindow = (phase, e, r) => {
+      if (!rightWindow) return;
+      const { startLo, startHi, gmin, gmax } = rightWindow;
+      const cur = r || { lo: startLo, hi: startHi, level: (startLo + startHi) / 2, width: startHi - startLo };
+      try {
+        onWindowDragRef.current?.({
+          phase, ...cur, gmin, gmax,
+          startLevel: (startLo + startHi) / 2, startWidth: startHi - startLo,
+          clientX: e.clientX, clientY: e.clientY, fine: !!e.shiftKey,
+        });
+      } catch (_e) {}
+    };
+    const RIGHT_DRAG_MODE_MAP = { zoom: DRAG_MODE.none, windowing: DRAG_MODE.none, pan: DRAG_MODE.pan };
     const handleRightDown = (e) => {
       if (e.button !== 2) return;
       const dpr = nvDpr();
@@ -1452,11 +1488,23 @@ const NiivueViewer = forwardRef(function NiivueViewer(
         e.preventDefault();
         return;
       }
-      // Right-drag mode toggle (top-right UI): "windowing"/"pan" hand the
-      // right button to NiiVue's own native drag handling (already configured
-      // via mouseEventConfig.rightButton in setDragMode) — back off entirely,
-      // no preventDefault/capture, so NiiVue's native listeners drive it.
-      // Only "zoom" (the default) is handled by this custom drag below.
+      // Right-drag mode toggle (top-right UI): "windowing" is ours (below);
+      // "pan" hands the right button to NiiVue's own native drag handling
+      // (configured via mouseEventConfig.rightButton in setDragMode) — back
+      // off entirely, no preventDefault/capture, so NiiVue drives it.
+      if (rightDragModeRef.current === "windowing") {
+        const v = nv.volumes?.[0];
+        if (!v || !Number.isFinite(v.cal_min) || !Number.isFinite(v.cal_max)) return;
+        rightWindow = {
+          x0: e.clientX, y0: e.clientY, startLo: v.cal_min, startHi: v.cal_max,
+          gmin: Number.isFinite(v.global_min) ? v.global_min : v.cal_min,
+          gmax: Number.isFinite(v.global_max) ? v.global_max : v.cal_max,
+        };
+        emitWindow("start", e);
+        try { canvas.setPointerCapture?.(e.pointerId); } catch (_e) {}
+        e.preventDefault();
+        return;
+      }
       if (rightDragModeRef.current !== "zoom") return;
       rightZoom = { lastY: e.clientY };
       try { canvas.setPointerCapture?.(e.pointerId); } catch (_e) {}
@@ -1521,12 +1569,31 @@ const NiivueViewer = forwardRef(function NiivueViewer(
         }
         return;
       }
+      if (rightWindow) {
+        const r = windowFromDrag({
+          ...rightWindow, dx: e.clientX - rightWindow.x0, dy: e.clientY - rightWindow.y0, fine: e.shiftKey,
+        });
+        const v = nv.volumes?.[0];
+        if (v) {
+          v.cal_min = r.lo;
+          v.cal_max = r.hi;
+          scheduleRedraw(true); // one texture update per frame, however fast the pointer
+        }
+        emitWindow("move", e, r);
+        return;
+      }
       if (!rightZoom) return;
       const dy = e.clientY - rightZoom.lastY;
       rightZoom.lastY = e.clientY;
       if (dy) applyDragZoom(dy);
     };
-    const handleRightUp = () => {
+    const handleRightUp = (e) => {
+      if (rightWindow) {
+        const v = nv.volumes?.[0];
+        emitWindow("end", e, v ? { lo: v.cal_min, hi: v.cal_max, level: (v.cal_min + v.cal_max) / 2, width: v.cal_max - v.cal_min } : null);
+        rightWindow = null;
+        return;
+      }
       if (clipRotate) {
         clipRotate = null;
         // Restore the right-button config to whatever the toggle currently
@@ -1547,7 +1614,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
           // erase spans several slices, so it isn't).
           try {
             if (snapshot && nv.drawBitmap && rleEncode(nv.drawBitmap) !== snapshot) {
-              drawHistory.current.push(snapshot);
+              drawHistory.current.push(snapshot, "Erase");
               if (mode === "circle2D") recordEraseEntry(saved, snapshot);
               emitHistory();
             }
@@ -1574,7 +1641,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
           }
           if (savedAxCorSag !== undefined) nv.drawPenAxCorSag = savedAxCorSag;
           if (snapshot && nv.drawBitmap && rleEncode(nv.drawBitmap) !== snapshot) {
-            drawHistory.current.push(snapshot);
+            drawHistory.current.push(snapshot, "Erase");
             recordEraseEntry(saved, snapshot);
             emitHistory();
           }
@@ -1636,6 +1703,8 @@ const NiivueViewer = forwardRef(function NiivueViewer(
         setLoaded(true);
         updateTileSliceInfo();
         onReady?.(nv);
+        // Fill the crosshair readout now, not at the first click.
+        if (nv.volumes[0]) { try { nv.createOnLocationChange(); } catch (_e) {} }
         // baseVolume.id is only "mni152" for the actual bundled template
         // (lib/atlasConfig.js); a quick-opened file gets its own id/name and
         // skips this (handleBaseUpload/markBaseLoadedExternally own its
@@ -1772,8 +1841,8 @@ const NiivueViewer = forwardRef(function NiivueViewer(
           pw = Math.round(fit.fitW * dpr * SS);
           ph = Math.round(fit.fitH * dpr * SS);
         } else {
-          pw = Math.round(cssW * dpr);
-          ph = Math.round(cssH * dpr);
+          pw = Math.round(cssW * dpr * renderScaleRef.current);
+          ph = Math.round(cssH * dpr * renderScaleRef.current);
         }
         // Never exceed the GPU's max texture size (context loss / corruption).
         if (maxTexSizeCache == null) {
@@ -1822,6 +1891,158 @@ const NiivueViewer = forwardRef(function NiivueViewer(
     resizeCanvasRef.current = resizeCanvas;
     resizeCanvas();
 
+    // Faster 3D while moving. While a drag on the 3D tile (left = turn, right =
+    // clip plane) or the wheel over it is going, a controller watches how long
+    // each draw takes and, only if they run slow, steps down ray-march
+    // sampling, the number of tract streamlines drawn and (in a 3D-only layout)
+    // the canvas size. It never steps back up mid-interaction. When the
+    // interaction ends everything snaps back and one sharp frame is drawn.
+    // Slice tiles are never softened: the canvas only shrinks when the 3D view
+    // fills it. NiiVue's depth pick runs on click, not during a drag, so it
+    // always sees full quality. uiData.dpr is re-derived by resizeCanvas, so
+    // pointer mapping stays exact throughout.
+    const qualityOn = () => getPref("lowResWhileRotating") || getPref("performanceMode");
+    let ctl = null;
+    let ctlMin = -1;
+    let active = false;
+    let dragging = false;
+    let wheelTimer = 0;
+    let replacedDraw = null;
+    let coalesced = null;
+    let qRaf = 0;
+    let qDirty = false;
+    let badgeKey = "";
+    let rotateFrom = null; // {x, y}
+    const get3DTile = () => nvRef.current?.screenSlices?.find((s) => s.axCorSag === 4);
+    const on3DTile = (e) => {
+      const nv = nvRef.current;
+      const tile = get3DTile();
+      if (!tile) return false;
+      const d = nv.uiData?.dpr || 1;
+      const r = canvas.getBoundingClientRect();
+      const x = (e.clientX - r.left) * d, y = (e.clientY - r.top) * d;
+      const [l, t, w, h] = tile.leftTopWidthHeight;
+      return x >= l && x <= l + w && y >= t && y <= t + h;
+    };
+    const setStepScale = (v) => {
+      const nv = nvRef.current;
+      const sh = nv?.renderShader;
+      const loc = sh?.uniforms?.stepScale;
+      if (!nv?.gl || !sh?.program || loc == null) return;
+      nv.gl.useProgram(sh.program);
+      nv.gl.uniform1f(loc, v);
+    };
+    const updateBadge = () => {
+      const tile = get3DTile();
+      const d = nvRef.current?.uiData?.dpr || 1;
+      const next = active && ctl?.level > 0 && tile
+        ? { left: Math.round(tile.leftTopWidthHeight[0] / d) + 8, top: Math.round(tile.leftTopWidthHeight[1] / d) + 8 }
+        : null;
+      const key = next ? `${next.left},${next.top}` : "";
+      if (key === badgeKey) return;
+      badgeKey = key;
+      setPreviewBadge(next);
+    };
+    // Canvas size only changes when the 3D view fills the canvas.
+    const applyLevel = (lv) => {
+      const q = LEVELS[lv] || LEVELS[0];
+      setStepScale(q.stepScale);
+      tractRenderStateRef.current.lodFraction = q.tractFraction;
+      const nv = nvRef.current;
+      const only3D = sliceTypeRef.current === "render" && !(nv?.customLayout?.length > 1);
+      const scale = only3D ? q.canvasScale : 1;
+      if (renderScaleRef.current !== scale) {
+        renderScaleRef.current = scale;
+        resizeCanvas();
+      }
+    };
+    const startInteraction = () => {
+      const nv = nvRef.current;
+      if (active || !nv || !qualityOn()) return;
+      const minLevel = getPref("performanceMode") ? 1 : 0;
+      if (!ctl || ctlMin !== minLevel) { ctl = createQualityController({ minLevel }); ctlMin = minLevel; }
+      active = true;
+      let applied = ctl.start();
+      applyLevel(applied);
+      replacedDraw = nv.drawScene;
+      const tick = () => {
+        qRaf = 0;
+        if (!qDirty) return;
+        qDirty = false;
+        const t0 = performance.now();
+        try { replacedDraw.call(nv); } catch (_e) {}
+        const t1 = performance.now(); // drawScene ends in gl.finish(), so this includes GPU time
+        const lv = ctl.frame(t1 - t0, t1);
+        if (lv !== applied) { applied = lv; applyLevel(lv); }
+        updateBadge();
+      };
+      coalesced = () => {
+        qDirty = true;
+        if (!qRaf) qRaf = requestAnimationFrame(tick);
+      };
+      nv.drawScene = coalesced;
+      updateBadge();
+    };
+    const endInteraction = () => {
+      dragging = false;
+      rotateFrom = null;
+      clearTimeout(wheelTimer);
+      wheelTimer = 0;
+      if (!active) return;
+      active = false;
+      const nv = nvRef.current;
+      if (qRaf) { cancelAnimationFrame(qRaf); qRaf = 0; }
+      qDirty = false;
+      // Put back exactly what we replaced (the volume-clip wrapper).
+      if (nv && nv.drawScene === coalesced) nv.drawScene = replacedDraw;
+      coalesced = null;
+      replacedDraw = null;
+      ctl.end();
+      setStepScale(1);
+      tractRenderStateRef.current.lodFraction = 1;
+      updateBadge();
+      if (!nv) return;
+      if (renderScaleRef.current !== 1) {
+        renderScaleRef.current = 1;
+        resizeCanvas(); // draws a sharp frame
+      } else {
+        nv.drawScene();
+      }
+    };
+    ensureStillRef.current = endInteraction;
+    const handleRotateDown = (e) => {
+      rotateFrom = (e.button === 0 || e.button === 2) && qualityOn() && on3DTile(e)
+        ? { x: e.clientX, y: e.clientY } : null;
+    };
+    const handleRotateMove = (e) => {
+      if (!rotateFrom || dragging) return;
+      if (Math.hypot(e.clientX - rotateFrom.x, e.clientY - rotateFrom.y) < 4) return;
+      dragging = true;
+      startInteraction();
+    };
+    const handleRotateUp = () => {
+      rotateFrom = null;
+      if (!dragging) return;
+      dragging = false;
+      if (!wheelTimer) endInteraction();
+    };
+    const handleQualityWheel = (e) => {
+      if (!qualityOn() || !on3DTile(e)) return;
+      startInteraction();
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        wheelTimer = 0;
+        if (!dragging) endInteraction();
+      }, 200);
+    };
+    const handleVisibility = () => { if (document.hidden) ctl?.reset(); };
+    canvas.addEventListener("pointerdown", handleRotateDown, true);
+    canvas.addEventListener("wheel", handleQualityWheel, { capture: true, passive: true });
+    window.addEventListener("pointermove", handleRotateMove, true);
+    window.addEventListener("pointerup", handleRotateUp, true);
+    window.addEventListener("pointercancel", handleRotateUp, true);
+    document.addEventListener("visibilitychange", handleVisibility);
+
     let ro;
     if (container && typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(scheduleResize);
@@ -1833,6 +2054,14 @@ const NiivueViewer = forwardRef(function NiivueViewer(
       cancelAnimationFrame(rafId);
       ro?.disconnect();
       window.removeEventListener("resize", scheduleResize);
+      try { endInteraction(); } catch (_e) {}
+      ensureStillRef.current = null;
+      try { canvas.removeEventListener("wheel", handleQualityWheel, true); } catch (_e) {}
+      try { document.removeEventListener("visibilitychange", handleVisibility); } catch (_e) {}
+      try { canvas.removeEventListener("pointerdown", handleRotateDown, true); } catch (_e) {}
+      window.removeEventListener("pointermove", handleRotateMove, true);
+      window.removeEventListener("pointerup", handleRotateUp, true);
+      window.removeEventListener("pointercancel", handleRotateUp, true);
       try { canvas.removeEventListener("dblclick", handleDblClick); } catch (_e) {}
       try { canvas.removeEventListener("mousemove", handleMouseMove); } catch (_e) {}
       try { canvas.removeEventListener("mouseleave", handleMouseLeave); } catch (_e) {}
@@ -2054,6 +2283,10 @@ const NiivueViewer = forwardRef(function NiivueViewer(
   useImperativeHandle(ref, () => ({
     getNiivue: () => nvRef.current,
 
+    // Ends any "faster 3D while moving" interaction now, so a capture sees a
+    // full-quality frame.
+    ensureStillQuality: () => ensureStillRef.current?.(),
+
     // mrview-parity tractography global render controls.
     // Patches tractRenderStateRef.current in place — read live, every frame,
     // inside the drawMesh3D wrapper (lib/gl/tractRenderer.js) — so this NEVER
@@ -2076,6 +2309,9 @@ const NiivueViewer = forwardRef(function NiivueViewer(
     // Measurement point markers (lib/viewer/markers.js).
     ...createMarkersApi(ctxRef.current, { recomputeMeasure2D }),
 
+    // Brief effects over the viewer: bloom, ring, glide, develop (lib/viewer/effects.js).
+    ...createEffectsApi(ctxRef.current, { fxLayerRef }),
+
     // Asymmetric layout + canvas-px hit-testing (lib/viewer/layout.js).
     ...createLayoutApi(ctxRef.current, { updateActiveTileHighlight, updateTileSliceInfo, setSideLayout, setHoveredSlice }),
 
@@ -2089,7 +2325,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
     ...createFrameApi(ctxRef.current, { scheduleRedraw }),
 
     // Save a PNG of the scene (lib/viewer/screenshot.js).
-    ...createScreenshotApi(ctxRef.current),
+    ...createScreenshotApi(ctxRef.current, () => ensureStillRef.current?.()),
 
     // Semi-automatic click-to-segment (lib/viewer/segmentation.js).
     ...createSegmentationApi(ctxRef.current),
@@ -2118,6 +2354,8 @@ const NiivueViewer = forwardRef(function NiivueViewer(
 
   return (
     <div className={`relative h-full w-full ${whiteBackground ? "bg-white" : "bg-black"} overflow-hidden`} data-testid="niivue-viewer">
+      {/* Marks for lib/viewer/effects.js, over the canvas, never in the way of a click. */}
+      <div ref={fxLayerRef} className="fx-layer" aria-hidden="true" />
       {/* In single-slice modes resizeCanvas() sizes/positions the canvas
           imperatively (aspect-correct box × fill-zoom), so the style prop must
           NOT set width/height there or React would clobber it each render. */}
@@ -2132,6 +2370,12 @@ const NiivueViewer = forwardRef(function NiivueViewer(
             : { width: "100%", height: "100%", display: "block" }
         }
       />
+      {previewBadge && (
+        <div className="absolute pointer-events-none z-20 px-2 py-1 bg-black/60 text-white/80 cap"
+          style={{ left: previewBadge.left, top: previewBadge.top }} data-testid="preview-badge">
+          Preview
+        </div>
+      )}
       {/* Draw-mode indicator: accent inset border + badge. pointer-events:none so
           it never blocks painting on the canvas underneath. */}
       {drawingActive && (

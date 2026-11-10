@@ -45,18 +45,23 @@ code,
     }
 }
 
-/* Custom scrollbar for sidebar */
-.thin-scroll::-webkit-scrollbar {
+/* One slim scrollbar for every scrolling area (inbox 29 Oct: "not all scrolls
+   are the same style"). It used to be opt-in via .thin-scroll, so lists that
+   forgot the class showed the thick system bar. .thin-scroll stays on the
+   elements that carry it; it is simply redundant now. */
+::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
-.thin-scroll::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
     background: transparent;
 }
-.thin-scroll::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
     background: hsl(var(--edge));
     border-radius: 3px;
 }
-.thin-scroll::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground));
 }
 
@@ -75,8 +80,9 @@ code,
         --background: 30 5.9% 6.7%;
         --panel: 40 6.7% 8.8%;
         --panel-hover: 45 6.7% 11.8%;
-        /* Open collapsible section, pressed segment — one tier above hover. */
-        --panel-active: 36 6.3% 15.5%;
+        /* Pressed toggle or segment, count badge: clearly above hover and
+           card (15.5% read as unpressed on a card; inbox 2 Nov). */
+        --panel-active: 36 6.3% 20%;
         --foreground: 38 31.4% 93.1%;
         --card: 45 6.7% 11.8%;
         --card-foreground: 38 31.4% 93.1%;
@@ -736,6 +742,337 @@ canvas.niivue-canvas:focus-visible {
     to { background-size: 0% 2px; }
 }
 
+/* Preferences ▸ Transparency (hooks/useWindowLook.js): the page goes clear so
+   the OS material shows behind the top bar, sidebar, rail and readout, each at
+   --chrome-alpha; floating menus and dialogs get a frosted backdrop. The
+   viewer keeps its own opaque black or white. Off under Performance mode. */
+:root[data-see-through] body,
+:root[data-see-through] [data-testid="dashboard-root"] {
+    background: transparent;
+}
+:root[data-see-through] [data-testid="sidebar"],
+:root[data-see-through] [data-testid="sidebar-rail"],
+:root[data-see-through] [data-testid="topbar"] {
+    background-color: hsl(var(--panel) / var(--chrome-alpha, 1));
+}
+:root[data-see-through] .popover,
+:root[data-see-through] [role="dialog"] {
+    background-color: hsl(var(--popover) / max(0.55, var(--chrome-alpha, 1)));
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    backdrop-filter: blur(18px) saturate(1.2);
+}
+
+/* Preferences ▸ Sidebar order (SectionOrderList.jsx): the row being dragged
+   lifts above the others while they glide out of its way. */
+.section-order-row[data-dragging] {
+    position: relative;
+    z-index: 2;
+    box-shadow: var(--elev-2);
+    border-color: hsl(var(--edge));
+}
+
+/* First run (FirstRun.jsx): the app stays visible behind, blurred; each step
+   slides in from the side it comes from. No blur in Performance mode. */
+.first-run {
+    background: hsl(var(--background) / 0.35);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    animation: fr-fade 260ms ease-out both;
+}
+:root[data-performance] .first-run {
+    background: hsl(var(--background) / 0.85);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.first-run-card { animation: fr-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.first-run-card.from-left { animation-name: fr-in-left; }
+@keyframes fr-fade { from { opacity: 0; } }
+@keyframes fr-in { from { opacity: 0; transform: translateX(28px); } }
+@keyframes fr-in-left { from { opacity: 0; transform: translateX(-28px); } }
+@media (prefers-reduced-motion: reduce) {
+    .first-run, .first-run-card { animation: none; }
+}
+
+/* Home screen (HomeScreen.jsx): over the viewer on a plain start, the
+   template dimmed and softly blurred behind it; no blur in Performance mode. */
+.home-screen {
+    background: hsl(var(--background) / 0.55);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    animation: fr-fade 220ms ease-out both;
+}
+:root[data-performance] .home-screen {
+    background: hsl(var(--background) / 0.85);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+/* In a window under 1200 px the inspector floats over the viewer's right
+   edge instead of taking its width (sidebar + inspector would leave a sliver). */
+@media (max-width: 1199px) {
+    [data-testid="inspector"] {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        box-shadow: var(--elev-2);
+    }
+}
+/* The inspector panel (lib/inspector.js): empty when its layer was removed. */
+.inspector-body:empty::before {
+    content: "That layer is gone. Select another one in the sidebar.";
+    display: block;
+    padding: 8px 4px;
+    font-size: 12.5px;
+    color: hsl(var(--muted-foreground));
+}
+
+/* Preferences ▸ General ▸ Spacing: compact (hooks/useWindowLook.js). Tighter
+   section rows, toolbar and layer cards; targets stay at least 28 px. */
+:root[data-density="compact"] nav[aria-label="Sections"] button[data-testid$="-toggle"][aria-expanded] {
+    height: 30px;
+}
+:root[data-density="compact"] [data-testid="topbar"] {
+    min-height: 40px;
+    padding: 4px 6px;
+}
+:root[data-density="compact"] [data-testid^="layer-"]:not([data-compact]) {
+    padding: 7px;
+}
+:root[data-density="compact"] nav[aria-label="Sections"] .space-y-2\.5 > * + * {
+    margin-top: 6px;
+}
+
+/* Brief effects over the viewer (lib/viewer/effects.js): marks in .fx-layer
+   above the canvas, never in the way of a click. Off with Preferences ▸ Visual
+   effects; effects.js also skips them under reduced motion. */
+.fx-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    overflow: hidden;
+    pointer-events: none;
+}
+.fx-bloom,
+.fx-ring {
+    position: absolute;
+    border-radius: 9999px;
+    pointer-events: none;
+}
+/* A new layer: a soft crema light spreading from the crosshair. */
+.fx-bloom {
+    background: radial-gradient(circle, hsl(var(--crema) / 0.38) 0%, hsl(var(--crema) / 0.14) 38%, transparent 70%);
+    animation: fx-bloom var(--fx-ms, 700ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes fx-bloom {
+    from { transform: scale(0.12); opacity: 0.95; }
+    to { transform: scale(1); opacity: 0; }
+}
+/* A lesion with no findings: a thin ring closes in around it, then fades. */
+.fx-ring {
+    border: 1.5px solid hsl(var(--ok));
+    box-shadow: 0 0 10px hsl(var(--ok) / 0.55), inset 0 0 6px hsl(var(--ok) / 0.35);
+    animation: fx-ring var(--fx-ms, 900ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes fx-ring {
+    0% { transform: scale(1.6); opacity: 0; }
+    35% { transform: scale(1); opacity: 1; }
+    70% { opacity: 1; }
+    100% { transform: scale(1); opacity: 0; }
+}
+/* A screenshot: one soft white flash over the viewer. */
+.fx-flash {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    animation: fx-flash 260ms ease-out both;
+}
+@keyframes fx-flash {
+    from { opacity: 0.55; }
+    to { opacity: 0; }
+}
+/* A freshly loaded scan develops from flat grey to full contrast. */
+.fx-develop {
+    animation: fx-develop 420ms ease-out both;
+}
+@keyframes fx-develop {
+    from { filter: contrast(0.15) brightness(1.15); }
+    to { filter: none; }
+}
+
+/* A brief glow (lib/viewer/effects.js): a section whose module just installed,
+   a layer card just added or put back by Undo. One crema breath, then gone. */
+.glow-once {
+    animation: glow-once 1.4s ease-out both;
+}
+@keyframes glow-once {
+    0% { box-shadow: 0 0 0 0 hsl(var(--crema) / 0); }
+    22% { box-shadow: 0 0 0 2px hsl(var(--crema) / 0.55), 0 0 18px 2px hsl(var(--crema) / 0.3); }
+    100% { box-shadow: 0 0 0 0 hsl(var(--crema) / 0); }
+}
+
+/* Slider snap points (ui/slider.jsx `snaps`): a small notch on the track, and
+   one pulse of the knob when it lands on one. */
+.slider-snap {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 6px;
+    margin-left: -1px;
+    transform: translateY(-50%);
+    border-radius: 1px;
+    background: hsl(var(--edge));
+    pointer-events: none;
+}
+.slider-knob[data-pulse="a"] { animation: knob-pulse-a 240ms ease-out; }
+.slider-knob[data-pulse="b"] { animation: knob-pulse-b 240ms ease-out; }
+@keyframes knob-pulse-a { 50% { transform: scale(1.35); } }
+@keyframes knob-pulse-b { 50% { transform: scale(1.35); } }
+
+/* A readout's up/down steppers (ui/editable-number.jsx): hidden until the
+   readout is hovered, and laid over the edge so nothing moves when they show. */
+.num-edit {
+    position: relative;
+}
+.num-steps {
+    position: absolute;
+    top: 50%;
+    right: -12px;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+}
+.num-edit:hover .num-steps {
+    opacity: 1;
+}
+.num-steps > button {
+    display: grid;
+    place-items: center;
+    width: 11px;
+    height: 9px;
+    border-radius: 2px;
+    color: hsl(var(--muted-foreground));
+}
+.num-steps > button:hover {
+    color: hsl(var(--foreground));
+    background: hsl(var(--panel-hover));
+}
+
+/* Held Ctrl/Cmd: each button with a single-key shortcut shows its key
+   (hooks/useShortcutHints.js). */
+[data-shortcut] {
+    position: relative;
+}
+[data-shortcut]::after {
+    content: attr(data-shortcut);
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    z-index: 30;
+    min-width: 14px;
+    padding: 0 3px;
+    border-radius: 4px;
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
+    font: 600 10px/14px ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-align: center;
+    pointer-events: none;
+    animation: shortcut-in 120ms ease-out both;
+}
+@keyframes shortcut-in {
+    from { opacity: 0; transform: translateY(2px); }
+}
+/* A readout value that just changed (CrosshairInfo's region names): a quick
+   crossfade instead of a hard swap. */
+.fade-swap {
+    animation: fade-swap 180ms ease-out both;
+}
+@keyframes fade-swap {
+    from { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .glow-once, .slider-knob[data-pulse], [data-shortcut]::after, .fade-swap { animation: none; }
+    .num-steps { transition: none; }
+}
+
+/* A step with no percentage to show (DICOM conversion, opening a series): a
+   short crema stripe sweeps across its segment. Still, half-filled, under
+   reduced motion. */
+.progress-indeterminate {
+    position: relative;
+    overflow: hidden;
+}
+.progress-indeterminate::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 45%;
+    border-radius: 9999px;
+    background: hsl(var(--crema));
+    animation: progress-sweep 1.2s ease-in-out infinite;
+}
+@keyframes progress-sweep {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(225%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .progress-indeterminate::after {
+        animation: none;
+        width: 50%;
+        opacity: 0.6;
+    }
+}
+
+/* Sidebar tool buttons trade their words for icons when the sidebar is
+   squeezed (inbox 6 Nov: "better if there are icons only"), instead of
+   cutting the text off. The button itself is the container, so each one
+   decides from its own width. .fit-full is the label, .fit-short an optional
+   shorter one (where icons alone would be ambiguous). The button keeps the
+   full label as its title / aria-label. .fit-label-lg is for a long label,
+   with a middle step (.fit-mid) between the two. .fit-row does the same for
+   a row of intrinsic-width buttons, by the row's width. */
+.fit-label,
+.fit-label-lg,
+.fit-row {
+    container-type: inline-size;
+}
+.fit-short,
+.fit-mid {
+    display: none;
+}
+@container (max-width: 184px) {
+    .fit-label-lg .fit-full {
+        display: none;
+    }
+    .fit-label-lg .fit-mid {
+        display: inline;
+    }
+}
+@container (max-width: 96px) {
+    .fit-label-lg .fit-mid {
+        display: none;
+    }
+    .fit-label-lg .fit-short {
+        display: inline;
+    }
+}
+@container (max-width: 118px) {
+    .fit-label .fit-full {
+        display: none;
+    }
+    .fit-label .fit-short {
+        display: inline;
+    }
+}
+@container (max-width: 240px) {
+    .fit-row .fit-full {
+        display: none;
+    }
+}
+
 /* The toolbar's labels shorten as the viewer narrows: "Coronal" -> "Cor",
    icon-only buttons for 3D, Mosaic, Open and Save. */
 @container (max-width: 1060px) {
@@ -746,3 +1083,194 @@ canvas.niivue-canvas:focus-visible {
         display: inline;
     }
 }
+
+/* ===== A new look, first stage ===== */
+
+/* Frosted surface (readout chip, floating panels): the panel colour at
+   (1 - transparency) alpha (--frost-alpha, hooks/useWindowLook.js) over a 22px
+   blur, a hairline edge and the second elevation. Solid in Performance mode,
+   and when the system asks for reduced motion. */
+.frosted {
+    background-color: hsl(var(--panel) / var(--frost-alpha, 0.8));
+    -webkit-backdrop-filter: blur(22px) saturate(1.2);
+    backdrop-filter: blur(22px) saturate(1.2);
+    border: 1px solid hsl(var(--border));
+    box-shadow: var(--elev-2);
+}
+:root[data-performance] .frosted {
+    background-color: hsl(var(--panel));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .frosted {
+        background-color: hsl(var(--panel));
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* Readout numbers: fixed-width mono columns so names never shift as digits change. */
+.ro-num {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: pre;
+}
+.ro-tag {
+    transition: opacity 160ms ease-out;
+}
+.ro-tag[data-faded] {
+    opacity: 0.15;
+}
+:root[data-performance] .ro-tag,
+:root[data-performance] .ro-tag[data-faded] {
+    transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .ro-tag { transition: none; }
+}
+
+/* Task toolbar: the set that arrives slides in vertically. */
+@keyframes tool-in-top { from { opacity: 0; transform: translateY(-100%); } }
+@keyframes tool-in-bottom { from { opacity: 0; transform: translateY(100%); } }
+/* The stage clips only while the set slides (a discrete overflow keyframe), so
+   the toolbar's popovers are never cut off the rest of the time. */
+@keyframes tool-clip { from, to { overflow: hidden; } }
+.tool-stage { position: relative; }
+.tool-stage[data-from] { animation: tool-clip 220ms; }
+.tool-stage[data-from="top"] > .tool-set { animation: tool-in-top 220ms cubic-bezier(0.2, 0, 0, 1) both; }
+.tool-stage[data-from="bottom"] > .tool-set { animation: tool-in-bottom 220ms cubic-bezier(0.2, 0, 0, 1) both; }
+:root[data-performance] .tool-stage,
+:root[data-performance] .tool-stage > .tool-set { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+    .tool-stage,
+    .tool-stage > .tool-set { animation: none !important; }
+}
+
+/* Movable panels: the grip, the dock targets shown while dragging, a docked or
+   floating card. */
+.panel-grip {
+    cursor: grab;
+    touch-action: none;
+}
+.panel-grip:active { cursor: grabbing; }
+.dock-target {
+    position: fixed;
+    z-index: 90;
+    pointer-events: none;
+    border: 1px dashed hsl(var(--crema-line));
+    border-radius: 8px;
+    background: hsl(var(--crema-tint) / 0.35);
+}
+.dock-target[data-hot] {
+    background: hsl(var(--crema-tint));
+}
+:root[data-performance] .dock-target { transition: none; }
+
+/* A dock area's divider between two panels, and its resizable inner edge:
+   a hairline that thickens to the crema line under the pointer. */
+.dock-divider {
+    position: relative;
+    touch-action: none;
+}
+.dock-divider::after {
+    content: "";
+    position: absolute;
+    inset: 2px 0;
+    background: hsl(var(--border));
+}
+.dock-divider[aria-orientation="vertical"]::after { inset: 0 2px; }
+.dock-divider:hover::after,
+.dock-divider:active::after,
+.dock-edge:hover,
+.dock-edge:active {
+    background: hsl(var(--crema-line));
+}
+.dock-edge { touch-action: none; }
+
+/* A floating card slides into its place (a snap, a clamp after the window
+   shrinks) unless it is being moved or resized; the line it snapped to shows
+   while it is. */
+.floating-card:not([data-busy]) {
+    transition: left 180ms cubic-bezier(0.2, 0.7, 0.2, 1), top 180ms cubic-bezier(0.2, 0.7, 0.2, 1),
+        width 180ms cubic-bezier(0.2, 0.7, 0.2, 1), height 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.snap-guide {
+    pointer-events: none;
+    background: hsl(var(--crema-line));
+}
+:root[data-performance] .floating-card { transition: none; }
+@media (prefers-reduced-motion: reduce) { .floating-card { transition: none !important; } }
+
+/* The toolbar docked left or right (owner, 10 Nov): one column of icons, the
+   groups stacked, the separators across; the expand button widens it to show
+   names. Its menus open beside it rather than under it. */
+.toolbar[data-vertical] {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: 48px;
+    padding: 6px 4px;
+    gap: 4px;
+}
+.toolbar[data-vertical][data-expanded] {
+    width: 196px;
+    align-items: stretch;
+}
+.toolbar[data-vertical] .tool-stage,
+.toolbar[data-vertical] .tool-set,
+.toolbar[data-vertical] .tb-seg {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+}
+.toolbar[data-vertical] .tb-sep {
+    width: 24px;
+    height: 1px;
+    margin: 2px auto;
+}
+.toolbar[data-vertical][data-expanded] .tb-sep { width: 100%; }
+.toolbar[data-vertical] .tb-long { display: none; }
+.toolbar[data-vertical] .tb-short { display: none; }
+.toolbar[data-vertical] .tb-b { padding: 0; min-width: 32px; }
+.toolbar[data-vertical][data-expanded] .tb-long { display: inline; }
+.toolbar[data-vertical][data-expanded] .tb-b,
+.toolbar[data-vertical][data-expanded] .tb-i {
+    justify-content: flex-start;
+    width: 100%;
+    padding: 0 8px;
+}
+/* Icons only: a button with an icon drops its text and its chevron (MNI). */
+.toolbar[data-vertical]:not([data-expanded]) .tb-b:has(svg) > span,
+.toolbar[data-vertical]:not([data-expanded]) .tb-b > svg:not(:first-child) { display: none; }
+/* With names: an icon-only button shows its name (its accessible label). */
+.toolbar[data-vertical][data-expanded] .tb-i::after {
+    content: attr(aria-label);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* A text-only button (Ax, Cor, Sag) keeps its short name as its icon. */
+.toolbar[data-vertical]:not([data-expanded]) .tb-b:not(:has(svg)) .tb-short { display: inline; }
+.toolbar[data-vertical] .popover {
+    top: 0;
+    margin-top: 0;
+}
+.toolbar[data-vertical][data-side="left"] .popover { left: calc(100% + 6px); right: auto; }
+.toolbar[data-vertical][data-side="right"] .popover { right: calc(100% + 6px); left: auto; }
+
+/* Narrow sidebar: the Draw mask brush radius is one compact row, "Brush radius"
+   shortened to "Radius" in a narrow sidebar (same container-query approach as .fit-label). */
+.radius-row { container-type: inline-size; }
+.radius-row .rr-short { display: none; }
+@container (max-width: 300px) {
+    .radius-row .rr-full { display: none; }
+    .radius-row .rr-short { display: inline; }
+}
+
+/* MRLatte's own title bar (Electron): a drag region, its controls excepted. */
+.app-titlebar { -webkit-app-region: drag; }
+.app-titlebar .no-drag,
+.app-titlebar button,
+.app-titlebar input { -webkit-app-region: no-drag; }

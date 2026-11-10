@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import { fetchModules } from "@/lib/modules";
+import { forgetCapabilities } from "@/lib/lesionMetrics";
 
 // Which optional modules are installed, fetched ONCE at startup and shared by
 // every gated section. See lib/modules.js for why asset URLs must never be
@@ -24,9 +25,18 @@ export function ModuleProvider({ children }) {
   // other thing that opens it — ModuleGate's install prompt — is rendered deep
   // inside the sidebar, several unrelated components away from the overlay.
   const [store, setStore] = useState({ open: false, focus: null });
+  // Installs running, per reporter (the Module Store and the Atlas Manager each
+  // keep their own jobs), so the toolbar's store icon can show that something
+  // is installing even with both closed (inbox 29 Oct).
+  const [installingBy, setInstallingBy] = useState({});
+  const reportInstalling = useCallback((source, n) => {
+    setInstallingBy((p) => (p[source] === n ? p : { ...p, [source]: n }));
+  }, []);
+  const installing = Object.values(installingBy).reduce((a, b) => a + b, 0);
 
   const refresh = useCallback(async () => {
     const res = await fetchModules();
+    forgetCapabilities();
     setState({
       loading: false,
       ok: res.ok,
@@ -45,8 +55,11 @@ export function ModuleProvider({ children }) {
   const closeStore = useCallback(() => setStore({ open: false, focus: null }), []);
 
   const value = useMemo(
-    () => ({ ...state, refresh, storeOpen: store.open, storeFocus: store.focus, openStore, closeStore }),
-    [state, refresh, store, openStore, closeStore],
+    () => ({
+      ...state, refresh, storeOpen: store.open, storeFocus: store.focus, openStore, closeStore,
+      installing, reportInstalling,
+    }),
+    [state, refresh, store, openStore, closeStore, installing, reportInstalling],
   );
   return <ModuleContext.Provider value={value}>{children}</ModuleContext.Provider>;
 }
@@ -57,6 +70,7 @@ export function useModules() {
   return useContext(ModuleContext) || {
     ...EMPTY, refresh: () => {}, storeOpen: false, storeFocus: null,
     openStore: () => {}, closeStore: () => {},
+    installing: 0, reportInstalling: () => {},
   };
 }
 
@@ -80,6 +94,16 @@ export function useCapability(cap) {
   const { loading, ok, capabilities } = useModules();
   if (loading || ok !== true) return null;
   return !!capabilities[cap];
+}
+
+/** lqtpy's features (quality check and Fix, the lesion measures, LQTpy
+ *  Analysis): `missing` is true only once the module state says the LQTpy
+ *  module (or the SciPy it needs) is absent, never while that is unknown;
+ *  `install` opens the module store at it (Install there brings SciPy too). */
+export function useLesionEngine() {
+  const has = useCapability("lesion-qc");
+  const { openStore } = useModuleStore();
+  return { missing: has === false, install: () => openStore("lqtpy") };
 }
 
 /** The manifest modules whose `unlocks` include `cap`. */

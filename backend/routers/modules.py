@@ -15,7 +15,9 @@ from deps import *  # noqa: F401,F403 (shared config, models, helpers)
 import deps            # for deps.MODULE_ROOT, which tests/env may repoint
 import hashlib
 import importlib.util
+import platform as _platform
 import re
+import sys
 import stat as _stat
 import tarfile
 import threading
@@ -273,6 +275,30 @@ def _check(entry: dict):
     return _check_data(entry)
 
 
+def _requires(entry: dict) -> list:
+    """The ids a module's manifest entry says it needs installed first."""
+    return [r for r in entry.get("requires") or [] if isinstance(r, str) and r]
+
+
+def _missing_requires(mid: str, by_id: dict, present: dict) -> list:
+    """What `mid` needs, directly or through another module, that is not
+    installed, deepest first: the order to install them in. An id the manifest
+    doesn't have counts as missing; a cycle is walked once, never forever."""
+    out, seen = [], {mid}
+
+    def walk(m):
+        for r in _requires(by_id.get(m) or {}):
+            if r in seen:
+                continue
+            seen.add(r)
+            walk(r)
+            if not present.get(r):
+                out.append(r)
+
+    walk(mid)
+    return out
+
+
 def human_bytes(n) -> str:
     """Human-readable size for the UI ('673 MB', '1.2 GB')."""
     try:
@@ -297,11 +323,16 @@ def module_snapshot() -> dict:
 
     modules = []
     capabilities = {}
+    # Every module's own check first: `requires` needs to know about the others.
+    by_id = {e["id"]: e for e in manifest.get("modules") or [] if e.get("id")}
+    checks = {mid: _check(e) for mid, e in by_id.items()}
+    present = {mid: c[0] for mid, c in checks.items()}
     for entry in manifest.get("modules") or []:
         mid = entry.get("id")
         if not mid:
             continue
-        installed, missing = _check(entry)
+        installed, missing = checks[mid]
+        missing_requires = _missing_requires(mid, by_id, present)
         record = ledger.get(mid) or {}
         # `verified` is a hash claim, and hashing is explicitly off this path.
         # It is therefore true only when the installer recorded a successful
@@ -332,9 +363,12 @@ def module_snapshot() -> dict:
             # A capability is on only if EVERY module that unlocks it is
             # present (currently one module per capability, but ANDing is the
             # safe default should a capability ever need two).
-            capabilities[cap] = capabilities.get(cap, True) and installed
+            # A module whose own requirements are missing can't run yet.
+            capabilities[cap] = capabilities.get(cap, True) and installed and not missing_requires
 
         sources = entry.get("sources") or []
+        py_bytes = (sum(int(s.get("bytes") or 0) for s in _python_sources(entry))
+                    if mtype == "python-package" else 0)
         modules.append({
             "id": mid,
             "name": entry.get("name") or mid,
@@ -349,9 +383,16 @@ def module_snapshot() -> dict:
             # Install copies the installer's own copy (no download) when true.
             "bundledCopy": bool(_bundled_copy(entry)),
             "version": record.get("version") or entry.get("version"),
-            "bytes": entry.get("bytes") or 0,
-            "bytesHuman": human_bytes(entry.get("bytes")),
+            # A python-package module's download is this platform's pinned
+            # files, which differ per platform (the manifest's `bytes` is one).
+            "bytes": py_bytes or entry.get("bytes") or 0,
+            "bytesHuman": human_bytes(py_bytes or entry.get("bytes")),
             "unlocks": unlocks,
+            # Modules this one needs first; those of them (and of theirs) not
+            # installed, in install order; installed modules that need this one.
+            "requires": _requires(entry),
+            "missingRequires": missing_requires,
+            "requiredBy": [o for o, e in by_id.items() if present[o] and mid in _requires(e)],
             "installed": installed,
             "verified": verified,
             "missing": missing,
@@ -416,6 +457,8 @@ def module_snapshot() -> dict:
             "notInstallableReason": (
                 None if mtype in ("data", "slot")
                 or (mtype == "python-package" and _python_sources(entry))
+                else f"Not available on this computer yet: no files are pinned for {_platform_tag()}."
+                if _pinned_sources(entry)
                 else "Python-package modules are not installable from the app yet."
             ),
         })
@@ -1046,6 +1089,36 @@ def module_by_id(mid: str, snapshot: dict = None):
     return next((m for m in snap["modules"] if m["id"] == mid), None)
 
 
+def _names(ids: list, snap: dict) -> str:
+    names = [(module_by_id(i, snap) or {}).get("name") or i for i in ids]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _refuse_missing_requires(module_id: str):
+    """Install order: a module that needs others goes in after them. The store
+    offers to install them first ("Install both"); any other caller is told which."""
+    snap = module_snapshot()
+    m = module_by_id(module_id, snap) or {}
+    need = m.get("missingRequires") or []
+    if need:
+        raise HTTPException(status_code=409, detail={
+            "error": "requires", "requires": need,
+            "message": (f"{m.get('name') or module_id} needs {_names(need, snap)} first. "
+                        f"Install {'it' if len(need) == 1 else 'them'}, then try again.")})
+
+
+def _refuse_if_required(module_id: str):
+    """Removal order: never take a module out from under an installed one that needs it."""
+    snap = module_snapshot()
+    m = module_by_id(module_id, snap) or {}
+    users = m.get("requiredBy") or []
+    if users:
+        raise HTTPException(status_code=409, detail={
+            "error": "required", "requiredBy": users,
+            "message": (f"{_names(users, snap)} {'needs' if len(users) == 1 else 'need'} "
+                        f"{m.get('name') or module_id}. Remove {'it' if len(users) == 1 else 'them'} first.")})
+
+
 # === Endpoints ================================================================
 
 @router.get("/modules")
@@ -1561,6 +1634,8 @@ async def uninstall_module(module_id: str):
     # and a `link` install has nothing under the root to delete at all, so they
     # get their own guard rather than being forced through _uninstall_guard's
     # resolve_entry()/installTo assumptions.
+    _manifest_entry(module_id)                  # 404 for an unknown id, before anything else
+    _refuse_if_required(module_id)
     if (_manifest_entry(module_id).get("type") or "data") == "slot":
         return await _uninstall_slot(module_id, _require_slot_module(module_id))
     if (_manifest_entry(module_id).get("type") or "data") == "python-package":
@@ -1808,10 +1883,35 @@ def _run_install_job(job_id: str, module_id: str, entry: dict, url: str, src: Pa
 # and the rest of the archive are ignored.
 # deps.add_installed_python_modules then puts that folder on sys.path.
 # tools/scripts/pin_python_modules.py writes the pins.
+#
+# A compiled wheel serves one platform, so the pin script tags it with the
+# platform it was resolved for ("platform": "win_amd64" / "macosx_arm64" /
+# "macosx_x86_64"); pure-Python files carry no tag and serve every platform.
 
-def _python_sources(entry: dict) -> list:
+def _platform_tag() -> str:
+    """This machine, in the terms of a pinned source's `platform` tag."""
+    if sys.platform == "win32":
+        return "win_amd64"
+    if sys.platform == "darwin":
+        return "macosx_arm64" if _platform.machine() == "arm64" else "macosx_x86_64"
+    return f"{sys.platform}_{_platform.machine()}"
+
+
+def _pinned_sources(entry: dict) -> list:
     return [s for s in entry.get("sources") or []
             if s.get("type") in ("wheel", "sdist") and s.get("url") and s.get("sha256")]
+
+
+def _python_sources(entry: dict) -> list:
+    """The pinned files this machine installs: the untagged ones plus those
+    tagged for its platform. Empty when the module pins platform-specific
+    wheels but none for this platform: it isn't available here."""
+    pinned = _pinned_sources(entry)
+    tagged = [s for s in pinned if s.get("platform")]
+    mine = [s for s in tagged if s["platform"] == _platform_tag()]
+    if tagged and not mine:
+        return []
+    return [s for s in pinned if not s.get("platform")] + mine
 
 
 def _extract_sdist(archive: Path, folders: list, boundary: Path):
@@ -2056,6 +2156,8 @@ class InstallRequest(BaseModel):
 async def install_module(module_id: str, body: Optional[InstallRequest] = None):
     """Start a download+install job. Returns { job_id } — poll
     /api/modules/jobs/{job_id} for progress."""
+    _manifest_entry(module_id)                  # 404 for an unknown id, before anything else
+    _refuse_missing_requires(module_id)
     if (_manifest_entry(module_id).get("type") or "data") == "python-package":
         return _start_wheel_install(module_id, _manifest_entry(module_id))
     entry = _require_data_module(module_id)

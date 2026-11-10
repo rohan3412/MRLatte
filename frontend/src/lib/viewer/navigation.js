@@ -109,17 +109,17 @@ export function createNavigationApi(ctx, { scheduleRedraw, applyZoomFactor, rese
     // handleRightDown/Move in the setup effect), "windowing" (brightness/
     // contrast), or "pan". Left-click is ALWAYS crosshair (when not drawing)
     // and is never touched here — this only configures the RIGHT button.
-    // "zoom" sets rightButton to DRAG_MODE.none so NiiVue's native handling is
-    // inert for right-click (exactly as the constructor's initial config did)
-    // and our own pointer handlers own the drag; "windowing"/"pan" hand the
-    // right button to NiiVue's own native drag handling via mouseEventConfig,
-    // and our own handlers back off (see rightDragModeRef checks below).
+    // "zoom" and "windowing" set rightButton to DRAG_MODE.none so NiiVue's
+    // native handling is inert for right-click (exactly as the constructor's
+    // initial config did) and our own pointer handlers own the drag
+    // (windowing: lib/windowDrag.js); "pan" hands the right button to NiiVue's
+    // own native drag handling via mouseEventConfig, and our handlers back off.
     setDragMode: (mode) => {
       const nv = nvRef.current;
       if (!nv) return;
       const m = mode === "windowing" || mode === "pan" ? mode : "zoom";
       rightDragModeRef.current = m;
-      const map = { zoom: DRAG_MODE.none, windowing: DRAG_MODE.windowing, pan: DRAG_MODE.pan };
+      const map = { zoom: DRAG_MODE.none, windowing: DRAG_MODE.none, pan: DRAG_MODE.pan };
       const dm = map[m];
       try {
         if (nv.opts.mouseEventConfig?.rightButton !== undefined) {

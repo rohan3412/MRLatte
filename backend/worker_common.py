@@ -16,8 +16,14 @@ import threading
 import time
 from pathlib import Path
 
-import numpy as np
-import nibabel as nib
+try:
+    import numpy as np
+except ImportError:  # viewer-only build without the NumPy module: see core_packages.py
+    from core_packages import np
+try:
+    import nibabel as nib
+except ImportError:
+    from core_packages import nib
 
 import atlas_labels
 
@@ -144,6 +150,54 @@ def extra_sys_path_for_worker():
 _INTERPOLATION_ORDER = {"continuous": 3, "linear": 1, "nearest": 0}
 
 
+def _scipy_resampling():
+    """(scipy.linalg, scipy.ndimage.affine_transform), or None when SciPy is
+    not installed. SciPy is the optional `python-scipy` module, not part of the
+    core install; without it only 'nearest' works (see _affine_nearest)."""
+    try:
+        from scipy import linalg
+        from scipy.ndimage import affine_transform
+    except ImportError:
+        return None
+    return linalg, affine_transform
+
+
+def _affine_nearest(data, matrix, offset, output_shape, output, cval):
+    """numpy-only stand-in for `scipy.ndimage.affine_transform(order=0,
+    mode='constant')`, used when SciPy is absent. Every call site resamples
+    with 'nearest', so the core install needs nothing more.
+
+    Must give the same voxels as SciPy, ties included (1 mm <-> 2 mm grids put
+    centres exactly on .5): tests/test_resample_parity.py compares the two on
+    every geometry case, random grids and the shipped atlases. What it copies
+    from SciPy's C code: a source coordinate is matrix @ index + offset (a 1-D
+    matrix is a per-axis zoom), it is rounded with floor(c + 0.5), and a voxel
+    whose coordinate is outside [0, n - 1] gets `cval` (SciPy's constant mode
+    tests the coordinate itself, so -0.25 is outside although it rounds to 0). Done one output
+    slab at a time, so a 2 mm brain grid costs a few MB, not a few hundred."""
+    m = np.asarray(matrix, dtype=np.float64)
+    off = np.asarray(offset, dtype=np.float64)
+    n = data.shape
+    _nx, ny, nz = output_shape
+    jj, kk = np.meshgrid(np.arange(ny, dtype=np.float64), np.arange(nz, dtype=np.float64), indexing="ij")
+    for i in range(output_shape[0]):
+        if m.ndim == 1:
+            # SciPy sends a 1-D matrix to zoom_shift with shift = offset / zoom
+            # and computes (index + shift) * zoom: same maths as index * zoom +
+            # offset, different last bit, and that decides ties.
+            sh = off / m
+            coords = (np.full(jj.shape, (i + sh[0]) * m[0]), (jj + sh[1]) * m[1], (kk + sh[2]) * m[2])
+        else:
+            coords = tuple(m[d, 0] * i + m[d, 1] * jj + m[d, 2] * kk + off[d] for d in range(3))
+        inside = np.ones(jj.shape, dtype=bool)
+        for d in range(3):
+            inside &= (coords[d] >= 0) & (coords[d] <= n[d] - 1)
+        idx = [np.floor(c + 0.5).astype(np.intp) for c in coords]
+        out = np.full(jj.shape, cval, dtype=output.dtype)
+        out[inside] = data[idx[0][inside], idx[1][inside], idx[2][inside]]
+        output[i] = out
+
+
 class BoundingBoxError(ValueError):
     """Target grid's field of view contains none of the source data."""
 
@@ -222,13 +276,24 @@ def resample_to_img(source_img, target_img, interpolation="continuous",
                     (this implementation never aliases the source data and
                     always takes the real resampling path).
     """
-    from scipy import linalg
-    from scipy.ndimage import affine_transform
-
     if interpolation not in _INTERPOLATION_ORDER:
         raise ValueError(
             f"interpolation must be one of {tuple(_INTERPOLATION_ORDER)}.\n"
             f" Got '{interpolation}' instead.")
+    scipy_parts = _scipy_resampling()
+    if scipy_parts is None and interpolation != "nearest":
+        raise ImportError(
+            f"resample_to_img: interpolation='{interpolation}' needs SciPy, which is "
+            "not installed. Install the SciPy module, or resample with 'nearest'.")
+    if scipy_parts is not None:
+        linalg, affine_transform = scipy_parts
+    else:
+        # numpy's inverse can differ from SciPy's in the last bit on some
+        # affines; the parity tests check that no voxel moves because of it.
+        linalg = np.linalg
+
+        def affine_transform(src, matrix, offset, output_shape, output, cval, order):
+            _affine_nearest(src, matrix, offset, output_shape, output, cval)
 
     affine = np.asarray(source_img.affine)
     source_shape = source_img.shape

@@ -3,12 +3,12 @@ import { Upload, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 /**
- * FileUploader - dashed dropzone for .nii / .nii.gz / .mgz / .mgh files.
+ * FileUploader - dashed dropzone for .nii / .nii.gz / .mgz / .mgh / .mif files.
  */
 export const FileUploader = ({
   label,
   description,
-  accept = ".nii,.nii.gz,.mgz,.mgh",
+  accept = ".nii,.nii.gz,.mgz,.mgh,.mif,.mif.gz",
   onFile,
   onFiles,
   multiple = false,

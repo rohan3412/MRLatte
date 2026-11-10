@@ -493,3 +493,72 @@ def test_rejects_unknown_interpolation():
     tgt = _img(np.zeros((6, 6, 6), np.int16), _aff((1.5, 1.5, 1.5), (0, 0, 0)))
     with pytest.raises(ValueError):
         vendored(src, tgt, interpolation="cubic")
+
+
+# --------------------------------------------------------------------------- #
+#  The numpy-only nearest path (SciPy not installed)
+# --------------------------------------------------------------------------- #
+# SciPy is a module now, not part of the core install. Every call site resamples
+# with 'nearest', so without SciPy resample_to_img takes a numpy-only path for
+# it. That path must give the SAME voxels as the SciPy path, not nearly the same:
+# grids at 1 mm and 2 mm put many voxel centres exactly on a .5 tie.
+import worker_common  # noqa: E402
+
+pytest.importorskip("scipy")
+
+
+def _numpy_only(monkeypatch):
+    monkeypatch.setattr(worker_common, "_scipy_resampling", lambda: None)
+
+
+def _same(a, b):
+    assert a.shape == b.shape and a.dtype == b.dtype
+    assert np.array_equal(a, b), f"{int(np.sum(a != b))} of {a.size} voxels differ"
+    assert np.array_equal(a.affine if hasattr(a, "affine") else 0, b.affine if hasattr(b, "affine") else 0)
+
+
+@pytest.mark.parametrize("name,src,tgt", [c for c in _cases()], ids=[c[0] for c in _cases()])
+def test_numpy_nearest_matches_scipy(monkeypatch, name, src, tgt):
+    with_scipy = vendored(src, tgt, interpolation="nearest")
+    _numpy_only(monkeypatch)
+    without = vendored(src, tgt, interpolation="nearest")
+    assert with_scipy.affine.tolist() == without.affine.tolist()
+    _same(_data(with_scipy), _data(without))
+
+
+@pytest.mark.parametrize("atlas_name", REAL_ATLASES)
+def test_numpy_nearest_matches_scipy_on_real_atlases(monkeypatch, atlas_name):
+    src, tgt = _real_case(atlas_name)
+    with_scipy = vendored(src, tgt, interpolation="nearest")
+    _numpy_only(monkeypatch)
+    _same(_data(with_scipy), _data(vendored(src, tgt, interpolation="nearest")))
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_numpy_nearest_matches_scipy_on_random_grids(monkeypatch, seed):
+    """Random zooms (incl. exact 2:1 and 1:2, where ties are everywhere),
+    offsets, flips and small rotations."""
+    rng = np.random.default_rng(seed)
+    zoom = rng.choice([0.5, 1.0, 2.0, 1.5, 0.75, 3.0])
+    src = _grid((17, 19, 15), _aff((1.0, 1.0, 1.0), (-8.0, -9.0, -7.0)), seed=seed, labels=list(range(12)))
+    rot = None if seed % 3 else float(rng.uniform(-20, 20))
+    tgt_aff = _aff((zoom, zoom, zoom), tuple(rng.integers(-12, 4, 3).astype(float) + rng.choice([0, 0.5, 0.25])),
+                   rot=rot, flip_x=bool(seed % 2))
+    tgt = _img(np.zeros((14, 16, 12), np.int16), tgt_aff)
+    try:
+        with_scipy = vendored(src, tgt, interpolation="nearest")
+    except Exception as e:  # noqa: BLE001 — a field of view outside the data: both must refuse
+        _numpy_only(monkeypatch)
+        with pytest.raises(type(e)):
+            vendored(src, tgt, interpolation="nearest")
+        return
+    _numpy_only(monkeypatch)
+    _same(_data(with_scipy), _data(vendored(src, tgt, interpolation="nearest")))
+
+
+def test_without_scipy_other_interpolations_say_what_they_need(monkeypatch):
+    src = _grid((8, 8, 8), _aff((1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), dtype=np.float32)
+    tgt = _img(np.zeros((5, 5, 5), np.int16), _aff((2.0, 2.0, 2.0), (0.5, 0.0, 0.0)))
+    _numpy_only(monkeypatch)
+    with pytest.raises(ImportError, match="SciPy"):
+        vendored(src, tgt, interpolation="linear")

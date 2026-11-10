@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Isolated worker: longitudinal comparison (SimpleITK affine registration +
+"""Isolated worker: longitudinal comparison (SimpleITK rigid registration +
 voxel-wise difference map).
 
 SimpleITK is a one-click module (longitudinal-simpleitk). Running it here, not
@@ -25,31 +25,33 @@ def _run_longitudinal(baseline_path: Path, followup_path: Path, out_path: Path):
     fixed = sitk.ReadImage(str(baseline_path), sitk.sitkFloat32)
     moving = sitk.ReadImage(str(followup_path), sitk.sitkFloat32)
 
+    # Reported for information only: the follow-up is ALWAYS registered. A
+    # matching grid (same scanner protocol) says nothing about where the head
+    # was, and skipping registration then compared a moved head unaligned
+    # (owner, 10 Nov: always register). Rigid (move + turn), not affine: both
+    # scans are the same head, and an affine fit would also scale and shear,
+    # absorbing real change such as atrophy or lesion growth.
     same_grid = (
         fixed.GetSize() == moving.GetSize()
         and fixed.GetSpacing() == moving.GetSpacing()
     )
-    if same_grid:
-        resampled = moving
-        metric = 0.0
-    else:
-        reg = sitk.ImageRegistrationMethod()
-        reg.SetMetricAsMattesMutualInformation(numberOfHistogramBins=32)
-        reg.SetMetricSamplingStrategy(reg.RANDOM)
-        reg.SetMetricSamplingPercentage(0.1)
-        reg.SetInterpolator(sitk.sitkLinear)
-        reg.SetOptimizerAsRegularStepGradientDescent(2.0, 1e-4, 200)
-        reg.SetOptimizerScalesFromPhysicalShift()
-        init = sitk.CenteredTransformInitializer(
-            fixed, moving, sitk.AffineTransform(3),
-            sitk.CenteredTransformInitializerFilter.GEOMETRY,
-        )
-        reg.SetInitialTransform(init, inPlace=False)
-        transform = reg.Execute(fixed, moving)
-        metric = float(reg.GetMetricValue())
-        resampled = sitk.Resample(
-            moving, fixed, transform, sitk.sitkLinear, 0.0, sitk.sitkFloat32
-        )
+    reg = sitk.ImageRegistrationMethod()
+    reg.SetMetricAsMattesMutualInformation(numberOfHistogramBins=32)
+    reg.SetMetricSamplingStrategy(reg.RANDOM)
+    reg.SetMetricSamplingPercentage(0.1)
+    reg.SetInterpolator(sitk.sitkLinear)
+    reg.SetOptimizerAsRegularStepGradientDescent(2.0, 1e-4, 200)
+    reg.SetOptimizerScalesFromPhysicalShift()
+    init = sitk.CenteredTransformInitializer(
+        fixed, moving, sitk.Euler3DTransform(),
+        sitk.CenteredTransformInitializerFilter.GEOMETRY,
+    )
+    reg.SetInitialTransform(init, inPlace=False)
+    transform = reg.Execute(fixed, moving)
+    metric = float(reg.GetMetricValue())
+    resampled = sitk.Resample(
+        moving, fixed, transform, sitk.sitkLinear, 0.0, sitk.sitkFloat32
+    )
 
     a = sitk.GetArrayFromImage(fixed)
     b = sitk.GetArrayFromImage(resampled)

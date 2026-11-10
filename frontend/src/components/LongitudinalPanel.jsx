@@ -133,13 +133,15 @@ export const LongitudinalPanel = ({ onDiffLoaded }) => {
           {metrics && (
             <div className="border border-border bg-panel p-3 font-mono text-[11px] text-muted-foreground space-y-1 rounded-lg" data-testid="long-metrics">
               <div>changed voxels: <span className="text-foreground">{metrics.changedVoxelPct}%</span></div>
-              <div>same grid: <span className="text-foreground">{metrics.sameGrid}</span></div>
+              {/* The backend sends Python's True/False. The follow-up is
+                  always registered, so the metric is always there. */}
+              <div>same grid: <span className="text-foreground">{metrics.sameGrid === "True" ? "yes" : "no"}</span></div>
               <div>reg. metric: <span className="text-foreground">{metrics.registrationMetric}</span></div>
               <div className="text-subtle">positive = follow-up &gt; baseline (warm overlay)</div>
             </div>
           )}
           <div className="text-[11.5px] text-subtle leading-relaxed">
-            follow-up is affine-registered to baseline (SimpleITK). diff map loads into Activation Maps.
+            The follow-up is aligned to the baseline by moving and turning it (rigid registration, SimpleITK), also when both share a grid, since the head may have moved; it is never stretched, so real change stays visible. The difference map loads into Activation maps.
           </div>
         </>
       )}

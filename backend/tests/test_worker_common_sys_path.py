@@ -46,6 +46,8 @@ def test_compute_extra_sys_path_deduplicates_and_ignores_blank_entries():
     assert worker_common._compute_extra_sys_path(current, baseline, None) == ["/extra"]
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows path rules: macOS and Linux paths are case-sensitive")
 def test_compute_extra_sys_path_is_case_and_separator_insensitive():
     """Windows paths that differ only by case or slash direction must not be
     reported as extra (os.path.normcase/normpath handles both)."""

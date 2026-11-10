@@ -42,7 +42,8 @@ deploy/          Dockerfile, docker-compose*.yml, Caddyfile
 
 `data/modules/` is where large assets live for a checkout — the manifest that catalogues them
 sits inside it too, alongside the payload it describes. In an installed copy the equivalent is
-`%LOCALAPPDATA%\MRLatte\modules`; either can be overridden with `MRLATTE_MODULE_ROOT`.
+`%LOCALAPPDATA%\MRLatte\modules` (macOS: `~/Library/Application Support/MRLatte/modules`); either
+can be overridden with `MRLATTE_MODULE_ROOT`.
 
 ## Data: what ships vs. what you provide
 
@@ -131,6 +132,57 @@ user-writable default avoids friction when adding modules after install.
 a Windows installer — an earlier 7-Zip self-extracting build was dropped once the NSIS path proved
 out: it launched a console window opening a browser tab rather than a real desktop window, needed
 an extra manual 7-Zip install on the build machine, and had no uninstaller.
+
+## Building for macOS
+
+macOS disk images (Apple Silicon and Intel) are built by GitHub Actions, in
+`.github/workflows/mac-build.yml`, on every push to the `macos` branch or by hand from the
+Actions tab ("Run workflow"). Each run builds both architectures, smoke-tests them and attaches
+`MRLatte-<version>-mac-arm64.dmg` and `-mac-x64.dmg` to the run (kept 14 days). The smoke tests
+check that:
+
+- the bundled backend starts, seeds the template and finds dcm2niix;
+- the Module Store installs a module from its macOS wheels;
+- the packaged app launches its own backend and leaves nothing running after it quits.
+
+They cannot check anything on screen.
+
+On a Mac you can build locally instead (Node + yarn, internet):
+
+```bash
+./build-mac.sh                 # this Mac's architecture; --arch arm64|x64 to choose
+```
+
+That runs `tools/build/assemble-bundle.sh` and then `yarn dist:mac:<arch>`, writing to
+`../MRLatte-build/electron/`. The bundle uses a pinned standalone CPython 3.11
+(python-build-standalone) instead of the Windows embeddable Python. Wheels are taken for macOS 12
+and newer, which is also the app's declared minimum.
+
+**Unsigned.** The app is ad-hoc signed (`tools/build/mac-adhoc-sign.js`), not signed with an Apple
+Developer ID, so macOS blocks it the first time it opens. After dragging MRLatte to Applications,
+either run this once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/MRLatte.app
+```
+
+or open it, then go to System Settings → Privacy & Security and click **Open Anyway**. The
+`xattr` route also clears the bundled Python and dcm2niix, which macOS may otherwise question
+separately.
+
+**Try on a real Mac before a release.** The smoke tests can't see the screen, so check these by
+hand:
+
+- the MNI152 viewer in 2D and 3D, with a tract overlay;
+- DICOM import;
+- double-clicking a `.nii` and a `.mrlatte` file in Finder;
+- a `mrlatte://` link;
+- closing every window and clicking the Dock icon (a working window comes back);
+- after Quit, nothing MRLatte left in Activity Monitor.
+
+The module root on macOS is `~/Library/Application Support/MRLatte/modules`. The one-click Python
+modules pin macOS wheels next to the Windows ones (`tools/scripts/pin_python_modules.py` tags each
+compiled wheel with its platform), so the Module Store works the same way there.
 
 ## Docker
 

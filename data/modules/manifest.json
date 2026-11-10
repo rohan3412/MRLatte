@@ -15,7 +15,8 @@
     "`sources` is an ORDERED fallback list — the phase-4 installer walks it until",
     "one succeeds. A non-redistributable module omits `github-release`.",
     "`sha256` is null until the phase-4 release pipeline fills it in; the API",
-    "reports verified=false for any module without a recorded hash verification."
+    "reports verified=false for any module without a recorded hash verification.",
+    "`requires` lists module ids that must be installed first (python-scipy before lqtpy). The backend refuses an install before them and a removal from under them; the store offers to install them together."
   ],
   "releaseBase": "https://github.com/cogneuro-rgb/MRLatte/releases/download",
   "modules": [
@@ -987,6 +988,152 @@
       }
     },
     {
+      "id": "python-numpy",
+      "name": "NumPy and NiBabel (scan maths)",
+      "description": "Reading scans on the server and the maths on them: the lesion report, atlas overlap, ROI measures, DICOM import, module checks, and everything that builds on them (SciPy, LQTpy, dissection, network mapping). The standard installer already has it; the viewer-only installer does not. One-click install downloads NumPy, NiBabel and two small helpers from PyPI (about 16 MB) and checks each against its pinned hash.",
+      "type": "python-package",
+      "tier": "optional",
+      "version": "2.4.6",
+      "unlocks": [
+        "numpy"
+      ],
+      "requires": [],
+      "bytes": 16076579,
+      "sha256": null,
+      "installTo": "python/numpy",
+      "pythonPackages": [
+        "numpy",
+        "nibabel"
+      ],
+      "license": {
+        "spdx": "BSD-3-Clause AND MIT",
+        "attribution": "NumPy: Harris et al., Nature 2020. NiBabel: Brett et al., the NiBabel developers.",
+        "redistributable": true
+      },
+      "sources": [
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/c5/31/7fc6239c12bce7e931463251cca4426c465e1876ba3cc785402ef4dd8f4e/numpy-2.4.6-cp311-cp311-win_amd64.whl",
+          "sha256": "1e254a00cdf42b1e4d5b3d68d33af63268d41340d8885df2ab6470f2e1500147",
+          "bytes": 12608406,
+          "platform": "win_amd64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0e/0d/f5957185c0ee2f3e12f78715aa9e3b353fd83633316c8532b38faa37e3f6/numpy-2.4.6-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "110f8b71aacb688ec69062bb7f6938a0f8acb01b7c1c4beb453c65b6d234584d",
+          "bytes": 14964111,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/b3/49/ec46835a70be8fa6446c495126ac84fdb28cb2558e1620ffb87a10c8b64c/numpy-2.4.6-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "0280e0356c0829a18d9de1cb7eee50ec22ca639878d7240307ca0943d73cd2c4",
+          "bytes": 16969194,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/3b/d7/601b6396b33536811668935faa790112266c70661be94555999be431f86f/nibabel-5.4.2-py3-none-any.whl",
+          "sha256": "553482c5f1e1034fc312edf6fb7f32236c0056439845d1c29293b7e8c98d4854",
+          "bytes": 3300985
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/8a/db/55a262f3606bebcae07cc14095338471ad7c0bbcaa37707e6f0ee49725b7/importlib_resources-7.1.0-py3-none-any.whl",
+          "sha256": "1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1",
+          "bytes": 37232
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+          "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+          "bytes": 129956
+        }
+      ]
+    },
+    {
+      "id": "python-scipy",
+      "name": "SciPy (scientific maths)",
+      "description": "The maths library under LQTpy (lesion quality checks, the lesion report, LQTpy Analysis), tract dissection, lesion network mapping and the report figures: resampling scans onto one grid, statistics and image morphology. Needs NumPy, which installs with it. One-click install downloads the official SciPy wheel from PyPI (about 37 MB) and checks it against its pinned hash.",
+      "type": "python-package",
+      "tier": "optional",
+      "version": "1.17.1",
+      "unlocks": [
+        "scipy"
+      ],
+      "requires": [
+        "python-numpy"
+      ],
+      "bytes": 36607512,
+      "sha256": null,
+      "installTo": "python/scipy",
+      "pythonPackages": [
+        "scipy"
+      ],
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "attribution": "SciPy: Virtanen et al., Nature Methods 2020.",
+        "redistributable": true
+      },
+      "sources": [
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/95/da/0d1df507cf574b3f224ccc3d45244c9a1d732c81dcb26b1e8a766ae271a8/scipy-1.17.1-cp311-cp311-win_amd64.whl",
+          "sha256": "d30e57c72013c2a4fe441c2fcb8e77b14e152ad48b5464858e07e2ad9fbfceff",
+          "bytes": 36607512,
+          "platform": "win_amd64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/f7/58/bccc2861b305abdd1b8663d6130c0b3d7cc22e8d86663edbc8401bfd40d4/scipy-1.17.1-cp311-cp311-macosx_12_0_arm64.whl",
+          "sha256": "e18f12c6b0bc5a592ed23d3f7b891f68fd7f8241d69b7883769eb5d5dfb52696",
+          "bytes": 28162057,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/df/75/b4ce781849931fef6fd529afa6b63711d5a733065722d0c3e2724af9e40a/scipy-1.17.1-cp311-cp311-macosx_10_14_x86_64.whl",
+          "sha256": "1f95b894f13729334fb990162e911c9e5dc1ab390c58aa6cbecb389c5b5e28ec",
+          "bytes": 31613675,
+          "platform": "macosx_x86_64"
+        }
+      ]
+    },
+    {
+      "id": "lqtpy",
+      "name": "LQTpy lesion analysis",
+      "description": "Lesion quality checks (Check drawing, Check a lesion mask, Fix), the lesion measures in the report, and LQTpy Analysis. Needs SciPy, which installs with it. One-click install downloads the LQTpy 0.7.0 wheel from its GitHub release (about 3.5 MB) and checks it against its pinned hash.",
+      "type": "python-package",
+      "tier": "optional",
+      "version": "0.7.0",
+      "unlocks": [
+        "lesion-qc"
+      ],
+      "requires": [
+        "python-scipy"
+      ],
+      "bytes": 3450810,
+      "sha256": null,
+      "installTo": "python/lqtpy",
+      "pythonPackages": [
+        "lqtpy"
+      ],
+      "license": {
+        "spdx": null,
+        "attribution": "LQTpy, the lesion quantification toolkit in Python: github.com/rohan3412/LQTpy.",
+        "redistributable": true
+      },
+      "sources": [
+        {
+          "type": "wheel",
+          "url": "https://github.com/rohan3412/LQTpy/releases/download/v0.7.0/lqtpy-0.7.0-py3-none-any.whl",
+          "sha256": "88b8e6ae6c24fa591a2acbdd92145888b382347fb43f16a14b227e7ae8e59af2",
+          "bytes": 3450810
+        }
+      ]
+    },
+    {
       "id": "tract-dissection-dipy",
       "name": "Tract dissection engine (dipy)",
       "description": "The streamline engine behind virtual tract dissection and LQTpy Analysis's dissection stage. Dissection also needs the whole-brain tractogram. One-click install downloads dipy and what it needs from PyPI (about 15 MB), each file checked against its pinned hash.",
@@ -995,6 +1142,9 @@
       "version": "1.12",
       "unlocks": [
         "dissect"
+      ],
+      "requires": [
+        "python-scipy"
       ],
       "bytes": 14534794,
       "sha256": null,
@@ -1012,13 +1162,15 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/aa/0c/475ba982925d3c6a88849a39d1b27afc2d1c134691360ebfe19dee6055f8/dipy-1.12.1-cp311-cp311-win_amd64.whl",
           "sha256": "97e6226e8ff9074e3dd4a5262a45c36dfbff971ad981a7b908c19054415b1481",
-          "bytes": 8887314
+          "bytes": 8887314,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/f7/20/e6c0ff62ca2ad1a396a34f4380bafccaaf8791ff8fccf3d995a1fc12d417/h5py-3.16.0-cp311-cp311-win_amd64.whl",
           "sha256": "17d1f1630f92ad74494a9a7392ab25982ce2b469fc62da6074c0ce48366a2999",
-          "bytes": 3191673
+          "bytes": 3191673,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1090,13 +1242,56 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/03/83/67c1bf83f815294d2c3acd7631f25b5cbe6067e1d56495f76829dd60057b/cachebox-5.2.3-cp311-cp311-win_amd64.whl",
           "sha256": "7e45798d6b969794840bb302857946d710ecb32af78dfcb3ab40f4e68ee7fdaf",
-          "bytes": 288024
+          "bytes": 288024,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/12/27/fb8d7338b4d551900fa3e580acbe7a0cf655d940e164cb5c00ec31961094/orderly_set-5.5.0-py3-none-any.whl",
           "sha256": "46f0b801948e98f427b412fcabb831677194c05c3b699b80de260374baa0b1e7",
           "bytes": 13068
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/bd/47/62dd711345f713046136006d81fa7964c55d8cab0bc0215ec529b674a26f/dipy-1.12.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "0cf3df588546836343c376a1fd4ada41d5f392c594bd67c32e5f9238ba202ab0",
+          "bytes": 9323384,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/bf/3b/38ff88b347c3e346cda1d3fc1b65a7aa75d40632228d8b8a5d7b58508c24/h5py-3.16.0-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "c3f0a0e136f2e95dd0b67146abb6668af4f1a69c81ef8651a2d316e8e01de447",
+          "bytes": 3087630,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/7d/9d/3b03f2e063161bcb1a5e0969d521b5c622c2da02252a5c8bd4ef0e4f9914/cachebox-5.2.3-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "23a3300ebbb526fa12ce6fa53699002f5fba6da23b4bbbaf8ba8b18a3f03e6b3",
+          "bytes": 356308,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/a3/de/a185809b3a0a48fe843d9a5909b9a1f0c816f63340139e030a2ece95b60d/dipy-1.12.1-cp311-cp311-macosx_11_0_x86_64.whl",
+          "sha256": "b41121f06810ced43f7137c8f3ec1a023888f3c7bab89c8e068cf2c682cf9efc",
+          "bytes": 9607964,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/ba/95/a825894f3e45cbac7554c4e97314ce886b233a20033787eda755ca8fecc7/h5py-3.16.0-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "719439d14b83f74eeb080e9650a6c7aa6d0d9ea0ca7f804347b05fac6fbf18af",
+          "bytes": 3721663,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/81/88/154179d492f2c000fe6efab3c3ff6b8eb94fbfaa09efe47999bce6b1e29f/cachebox-5.2.3-cp311-cp311-macosx_10_12_x86_64.whl",
+          "sha256": "996f49d04b234082530afcc650bdd00556afbebc19c6c0daaafb85950340cb3c",
+          "bytes": 374245,
+          "platform": "macosx_x86_64"
         },
         {
           "type": "pip",
@@ -1119,6 +1314,9 @@
       "tier": "optional",
       "unlocks": [
         "lnm"
+      ],
+      "requires": [
+        "python-scipy"
       ],
       "envVar": "LNM_BUNDLE",
       "license": {
@@ -1151,6 +1349,9 @@
       "unlocks": [
         "longitudinal"
       ],
+      "requires": [
+        "python-numpy"
+      ],
       "bytes": 18925827,
       "sha256": null,
       "installTo": "python/longitudinal",
@@ -1162,7 +1363,22 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/16/d0/a746280d0987413e443c26f19fe5c559fb3034160ee0a7307ae2d85e8d59/simpleitk-2.5.6-cp311-abi3-win_amd64.whl",
           "sha256": "0002b298efb31332f99587cf26ed9f42c2c3ec006a0570f492dfc9ea27303d73",
-          "bytes": 18925827
+          "bytes": 18925827,
+          "platform": "win_amd64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/68/e8/18d2351ef7b6a17c921f1fbac3a19dc3a27f6ea7749c2f5a5877e38202b9/simpleitk-2.5.6-cp311-abi3-macosx_11_0_arm64.whl",
+          "sha256": "afcda49474748548fa1b7dbb9f557c3b9feafeb0dd3c2e05d771cc935c86646e",
+          "bytes": 38252322,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/c8/30/cb0eec647afea94c1d95bed3c0014a96565404e4225dba2c0c63bbdd6b9a/simpleitk-2.5.6-cp311-abi3-macosx_10_9_x86_64.whl",
+          "sha256": "36658792fe2a62814cbfedb3b236ac722ca7e00953241726bc4a3a26cc7ef5a7",
+          "bytes": 42685058,
+          "platform": "macosx_x86_64"
         },
         {
           "type": "pip",
@@ -1192,6 +1408,9 @@
       "unlocks": [
         "validation"
       ],
+      "requires": [
+        "python-scipy"
+      ],
       "bytes": 41249616,
       "sha256": null,
       "installTo": "python/validation",
@@ -1214,7 +1433,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/98/87/c6ef52ff30388f357922d08de012abdd3dc61e09311d88967bdae23ab657/pyrsistent-0.20.0-cp311-cp311-win_amd64.whl",
           "sha256": "59a89bccd615551391f3237e00006a26bcf98a4d18623a19909a2c48b8e986ee",
-          "bytes": 63306
+          "bytes": 63306,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1232,7 +1452,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/f7/20/e6c0ff62ca2ad1a396a34f4380bafccaaf8791ff8fccf3d995a1fc12d417/h5py-3.16.0-cp311-cp311-win_amd64.whl",
           "sha256": "17d1f1630f92ad74494a9a7392ab25982ce2b469fc62da6074c0ce48366a2999",
-          "bytes": 3191673
+          "bytes": 3191673,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1250,7 +1471,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/0f/15/52b5e65f02b33686ae49f1518548ae4f5a7adaf31d9d3c54fa12a143137b/aiohttp-3.14.5-cp311-cp311-win_amd64.whl",
           "sha256": "6f275c11d1aa6d4c458e05a68be084efe3c55a113d99e3f46a318098e52948fc",
-          "bytes": 512575
+          "bytes": 512575,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1280,7 +1502,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/1f/02/41d769148f32c9bd535fd0ddd946c4e42f38acaddf7899f3bf49d9e67703/multidict-7.2.1-cp311-cp311-win_amd64.whl",
           "sha256": "a789e3d27fc5665cc0477f10a35a89383313e4c9cf8b5e6af7ea71f039cdcc0e",
-          "bytes": 94895
+          "bytes": 94895,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1292,13 +1515,15 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/e6/d4/ae9ca837038a7a9aadb906eeca76b42df54e299edb29f8ac2cbad1d55b4f/wrapt-2.5.1-cp311-cp311-win_amd64.whl",
           "sha256": "ce3889e3815f97d46414eb574bffdd9bdb41ff70f503097e2707615a87d4e92c",
-          "bytes": 105878
+          "bytes": 105878,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/aa/9d/8cdceec66a9b940700cb45931741403f045b162afd79bcb93c41cadd0972/yarl-1.25.1-cp311-cp311-win_amd64.whl",
           "sha256": "d7306dee25b8a0e737363f347362b875094b4dc4e367311470656ae420fdbf8e",
-          "bytes": 102894
+          "bytes": 102894,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1334,7 +1559,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/0a/f5/603d0d6a02cfd4c8f2a095a54672b3cf967ad688a60fb9faf04fc4887f65/frozenlist-1.8.0-cp311-cp311-win_amd64.whl",
           "sha256": "ac913f8403b36a2c8610bbfd25b8013488533e71e62b4b4adce9c86c8cea905b",
-          "bytes": 44064
+          "bytes": 44064,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1346,7 +1572,120 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/0a/8a/3db6a3543d8101263b4c52978b6276a04ead2caff2c5ab880d934f47bd89/propcache-0.5.4-cp311-cp311-win_amd64.whl",
           "sha256": "e904d4d01f36bd6e197590be1533c44e06058771e0746dd073a8ebb3ef880858",
-          "bytes": 46268
+          "bytes": 46268,
+          "platform": "win_amd64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/df/63/7544dc7d0953294882a5c587fb1b10a26e0c23d9b92281a14c2514bac1f7/pyrsistent-0.20.0-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "0f3b1bcaa1f0629c978b355a7c37acd58907390149b7311b5db1b37648eb6958",
+          "bytes": 83481,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/bf/3b/38ff88b347c3e346cda1d3fc1b65a7aa75d40632228d8b8a5d7b58508c24/h5py-3.16.0-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "c3f0a0e136f2e95dd0b67146abb6668af4f1a69c81ef8651a2d316e8e01de447",
+          "bytes": 3087630,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/3d/fe/92838944e601f0fe195fd3f3ada37e29fbee3d19bfd323fe15937ec79d36/aiohttp-3.14.5-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "a2c473a355f9239efcb72c92d5abfd8fcdb0cc78c8e9af607e72ca12dbb36593",
+          "bytes": 552588,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/7a/57/39be4ac4fa9c20e3af7dd7e89adf7dd404b4547fb4453c5c96082e197b9c/multidict-7.2.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "0d852d3d9638f852158d7de7200dd77f7ff8d77fc8f3d396032f3d847883f631",
+          "bytes": 104843,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0a/54/a5b9904d341ae255bc5618ac43830ab68ed6420dac62af9a305a6191062a/wrapt-2.5.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "1910be5adc0232cc6e8c0673bf3f41c2ee724547543526bed8d00734458e7bc5",
+          "bytes": 105759,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/ce/7c/fbb40fe2d53747c40aa36a9e2bd2178a202f942bda0b670f3306d4aefbce/yarl-1.25.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "564fdc7085d2245ab84f88882fdb1d6ac0723124bff6ded35bfb1c00f812630d",
+          "bytes": 104010,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/6e/ef/0e8f1fe32f8a53dd26bdd1f9347efe0778b0fddf62789ea683f4cc7d787d/frozenlist-1.8.0-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "fa47e444b8ba08fffd1c18e8cdb9a75db1b6a27f17507522834ad13ed5922b93",
+          "bytes": 50119,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/05/cf/b5248180bf056cc76acc60c9c6e8c0ebbfdbd1c6cffd31fd14996927b7c8/propcache-0.5.4-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "3fc24f209c1b7f7f688b66b98293954f5504279760999b58920ee12dd8471c1d",
+          "bytes": 52116,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/df/63/7544dc7d0953294882a5c587fb1b10a26e0c23d9b92281a14c2514bac1f7/pyrsistent-0.20.0-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "0f3b1bcaa1f0629c978b355a7c37acd58907390149b7311b5db1b37648eb6958",
+          "bytes": 83481,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/ba/95/a825894f3e45cbac7554c4e97314ce886b233a20033787eda755ca8fecc7/h5py-3.16.0-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "719439d14b83f74eeb080e9650a6c7aa6d0d9ea0ca7f804347b05fac6fbf18af",
+          "bytes": 3721663,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/8e/42/084651e9efb5cadb99265f786df60f2a7b353cead7bfd2c87003cb4867ad/aiohttp-3.14.5-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "ae53924aa853a7a2ca20ed4142c7c6b56338e4d4cd999e2980075b9efc2e257a",
+          "bytes": 559636,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/8d/f2/2a8fcfe4c2c435101f9227b7f7ea81d786ffef993cadd2394e6926020ca9/multidict-7.2.1-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "cecb2c778f00a65c6ca01410dd194d0e797a9eebb7c6dea0db87718719f293c7",
+          "bytes": 97197,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/c4/2b/0f2ae9e355a0491c202a1331ec405d794c249f4fe9b4db952c0246909786/wrapt-2.5.1-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "aed178902c2386d7c5d3d23eb96d32c100e34cb8c2390e7ece0e4901ae43f0e7",
+          "bytes": 105587,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/55/e6/cd145cff8e5cf60b8b3c41fbecfa2a45028a8dec3fbc52bec03595ff3d3b/yarl-1.25.1-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "ab2054c5531af2a9ba7b69b8ec91e4f884420e83a8c5e579b013084cb57e5e5d",
+          "bytes": 103993,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/df/b5/7610b6bd13e4ae77b96ba85abea1c8cb249683217ef09ac9e0ae93f25a91/frozenlist-1.8.0-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "17c883ab0ab67200b5f964d2b9ed6b00971917d5d8a92df149dc2c9779208ee9",
+          "bytes": 50046,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/e7/4b/5a52e1a7b43563f7d408814194bb23cc8bf214eb6b86639b667a33a8d0d0/propcache-0.5.4-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "9cbfff4423eef4cc6cafc021469641a2b835f610b2647a6c5281903e21b8670d",
+          "bytes": 50431,
+          "platform": "macosx_x86_64"
         },
         {
           "type": "sdist",
@@ -1394,6 +1733,9 @@
       "unlocks": [
         "reports"
       ],
+      "requires": [
+        "python-scipy"
+      ],
       "bytes": 50730665,
       "sha256": null,
       "installTo": "python/reports",
@@ -1418,19 +1760,22 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/66/54/91fe3fdfa29100b4668cbf9721577a10acde6e009694618230e4e7a97527/matplotlib-3.11.2-cp311-cp311-win_amd64.whl",
           "sha256": "a24d5fd36e4f0e742c3851dcd20810e56a95633a342e4bf6cb591c678e8fe61f",
-          "bytes": 9329982
+          "bytes": 9329982,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/f5/1a/e33f6637445dd4b7323aa7bdaf4cc15c383805b4a2e99f958b7e32296e58/pandas-3.1.0-cp311-cp311-win_amd64.whl",
           "sha256": "a7704e3d7367cfae71d3f8c95ee81e178c7a90bef8d6eac30df9815010722259",
-          "bytes": 10977787
+          "bytes": 10977787,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/98/4b/9bd370b004b5c9d8045c6c33cf65bae018b27aca550a3f657cdc99acdbd8/contourpy-1.3.3-cp311-cp311-win_amd64.whl",
           "sha256": "3519428f6be58431c56581f1694ba8e50626f2dd550af225f82fb5f5814d2a42",
-          "bytes": 225234
+          "bytes": 225234,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1442,7 +1787,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/24/73/5c281531cf7899ae37a0937c62feed1f7d0e8a35538eea4d1595b52447e1/fonttools-4.67.0-cp311-cp311-win_amd64.whl",
           "sha256": "33ae23a531795864fcdbbab91a40c824976e22642c05efca3bd8a0b00630d0e7",
-          "bytes": 1646300
+          "bytes": 1646300,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1466,19 +1812,22 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/bf/9f/6f9e489c188200e6fb3193935501894811e8c97577c8ffe9033589bf3521/kiwisolver-1.5.1-cp311-cp311-win_amd64.whl",
           "sha256": "1a7587dc335f2c0f5bd577fd0540bd16c66006bdb60f759a1059f025e6c4f071",
-          "bytes": 70744
+          "bytes": 70744,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/91/89/f2b509f7bf79352e40117824c1070dbeafd4df67031d3fa98165a3134228/markupsafe-3.0.4-cp311-cp311-win_amd64.whl",
           "sha256": "fdb4ca07ab75ffadab4a8b135ad59cdbb3156b99310f3d565370da74a15d6bd3",
-          "bytes": 14328
+          "bytes": 14328,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/7d/f6/6e2d96413e4c9dbec12ea584d9e646d602877d4cce3ea669099f959deac6/pillow-13.0.0-cp311-cp311-win_amd64.whl",
           "sha256": "d7710eb676e9bb68965cb045be0d333b4c0d7f9dfbaa7fbf121385b1588683d3",
-          "bytes": 7278471
+          "bytes": 7278471,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1496,7 +1845,8 @@
           "type": "wheel",
           "url": "https://files.pythonhosted.org/packages/29/8a/8d1e888fe3d0dd4e2a1f3356dad703eed569aaf673e222b6f647005ad30f/scikit_learn-1.9.1-cp311-cp311-win_amd64.whl",
           "sha256": "220fa18152852a5ce29c49e1eaba9d44ec44631cd2e5cf65f5a40eafa5ab3412",
-          "bytes": 8329877
+          "bytes": 8329877,
+          "platform": "win_amd64"
         },
         {
           "type": "wheel",
@@ -1515,6 +1865,118 @@
           "url": "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
           "sha256": "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
           "bytes": 26362
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0b/d7/59d8ee63e4dee845d953515c50d67e6b8cefa953b453c6b803f197ae556e/matplotlib-3.11.2-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "c27e577ece613ea12a0790e00b4eb80d901c59a3e16cad474f31d8b1529690b9",
+          "bytes": 9290872,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/ec/73/e5243378792b79d3d08f9a6782a0e23ae65cc8c6d2f476b9d2825946b071/pandas-3.1.0-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "0d2ca3b380f0f6cc788780430eb23762619730c11d53989f3982ec96835bfb9e",
+          "bytes": 11159002,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0d/44/c4b0b6095fef4dc9c420e041799591e3b63e9619e3044f7f4f6c21c0ab24/contourpy-1.3.3-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "23416f38bfd74d5d28ab8429cc4d63fa67d5068bd711a85edb1c3fb0c3e2f381",
+          "bytes": 270149,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/5e/a5/723340838581bbed0590429662750dc70d67ba671947b7d5fa06a4e15c19/fonttools-4.67.0-cp311-cp311-macosx_10_9_universal2.whl",
+          "sha256": "47dba566b4f475b0fb5f83129487c21b6a6a4edc41c0eec52524f969a68a3d45",
+          "bytes": 3100299,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/e8/2b/8b08b11833db4d475b8ef1f36174f8d8a7abd31bedd7e794be78e8814b48/kiwisolver-1.5.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "dc1a26b8e53395a01c2c611e58602fa47461f136fba7cd5542e6db6d64be1839",
+          "bytes": 64071,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/6c/14/0b05f79b4733e264a18d08fe08fa1df7347630ff32a6cb82180d9dccec55/markupsafe-3.0.4-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "7d3391b2188d18737cb2fa147028b1096236eaa7e156446c650a489fa2cadc91",
+          "bytes": 12063,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/0b/d2/2c12cb4fbb5d95f38d1001ff3d95fafcb830077018cba40e56a8f932dfbc/pillow-13.0.0-cp311-cp311-macosx_11_0_arm64.whl",
+          "sha256": "37290fbef0c73e2d51d594eb78fded7dc7170d1c3ad0a890269e6fd8c8c4e061",
+          "bytes": 4856298,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/23/31/dc50d8780ac647bed9417f10a8b15ae3cf990ad7edb4f4b468f35030f8c5/scikit_learn-1.9.1-cp311-cp311-macosx_12_0_arm64.whl",
+          "sha256": "b48b2b5b41d9c5fbafef5f37b042f61110df3318ad2a45baf57287ea5b9ba5a2",
+          "bytes": 8290892,
+          "platform": "macosx_arm64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/c0/a9/a7fc5a63c427aeb9a4b99d6a0449f891be0952d3aee2b85229099f7b9f54/matplotlib-3.11.2-cp311-cp311-macosx_10_12_x86_64.whl",
+          "sha256": "5e1e923a3fc3326b99ec0a6ff1ab1338ac6c6cc62ad9d8a9c944197c7f8c6221",
+          "bytes": 9461046,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/36/f2/d8d89ee886df6d959d7b9f483a55a0e5a1d5b034f08c32f4343a524af802/pandas-3.1.0-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "d53387f8bbff4e7aa567619d4034ffdb1836db1e768a482851b904bbeeed8ef9",
+          "bytes": 11595013,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/91/2e/c4390a31919d8a78b90e8ecf87cd4b4c4f05a5b48d05ec17db8e5404c6f4/contourpy-1.3.3-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "709a48ef9a690e1343202916450bc48b9e51c049b089c7f79a267b46cffcdaa1",
+          "bytes": 288773,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/5b/fd/71b5a2eb0549ffcfa06da1628b44c9a0519a66e72805651a1826181e19ce/fonttools-4.67.0-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "5377e0e991e3e2be47fd1215414b20c2288b546e5a8c6d80b1a7cde9c72a89e1",
+          "bytes": 2597611,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/8a/24/e70914415c77c97be7e22c80a0740869cb7428768cc380fdcdf6703e7084/kiwisolver-1.5.1-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "5025e36fb4fb275cef0a4e30dbb11cb4ae61d1c83deb90189cb5d7e4cafd6b55",
+          "bytes": 66558,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/32/55/18dbb4778b30ada5ce071608503cc3edc9e14e13d868c17a6d178fc30f7a/markupsafe-3.0.4-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "9e25feb9e330b63edb0278a0acdf85e50d0cb0fbf49c3084abbe4e24ae195346",
+          "bytes": 11520,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/6c/d7/af6af1b8cc55e07cb0489d5b0950bf5a9bb1461eeba825700b6d8d0e26ea/pillow-13.0.0-cp311-cp311-macosx_10_10_x86_64.whl",
+          "sha256": "6f38f3f885a09cafc93fd667b1173a92f379e43785d635e7983c893f0da319fb",
+          "bytes": 5592324,
+          "platform": "macosx_x86_64"
+        },
+        {
+          "type": "wheel",
+          "url": "https://files.pythonhosted.org/packages/79/67/1904bf57ab9ea77b5ba3899178bcb35ff8d814fc38ef6d1283bcddeaf04a/scikit_learn-1.9.1-cp311-cp311-macosx_10_9_x86_64.whl",
+          "sha256": "326c188f92084bf58664229f4578eeab6176313b37cd5dfc85abd92b94130c58",
+          "bytes": 8823771,
+          "platform": "macosx_x86_64"
         },
         {
           "type": "pip",

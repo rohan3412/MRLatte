@@ -1,0 +1,10 @@
+# OPTIONAL SciPy: the `python-scipy` module in data/modules/manifest.json
+# (type: python-package). Not in the core install since 0.6.0: the core's only
+# SciPy use was the resampler, and every call site resamples with 'nearest',
+# which worker_common.resample_to_img now does with numpy alone (bit-identical,
+# tests/test_resample_parity.py). What still needs SciPy: lqtpy (the `lqtpy`
+# module requires this one), dipy, lesion network mapping, neuropythy, nilearn.
+#
+# Full installer only (assemble-bundle -Full stages it as python-scipy\, with
+# --no-deps: numpy is in the core). Everyone else installs it from the store.
+scipy==1.17.1

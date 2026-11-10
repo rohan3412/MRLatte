@@ -3,7 +3,7 @@
 // desktop runtime and use native file dialogs. Kept narrow on purpose;
 // contextIsolation stays on and nodeIntegration off.
 
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webUtils, webFrame } = require("electron");
 
 const APPEARANCES = ["system", "light", "dark"];
 
@@ -36,6 +36,16 @@ contextBridge.exposeInMainWorld("mrlatte", {
   // them; a DICOM base's source folder is read with readDicomFolder.
   allowWorkspaceLinks: () => ipcRenderer.invoke("mrlatte:allowWorkspaceLinks"),
   readDicomFolder: (folderPath) => ipcRenderer.invoke("mrlatte:readDicomFolder", folderPath),
+  // Recent scans for the home screen (main keeps the list; see electron.js).
+  getRecent: () => ipcRenderer.invoke("mrlatte:getRecent"),
+  addRecent: (filePath, name, thumb) => ipcRenderer.invoke("mrlatte:addRecent", { filePath, name, thumb }),
+  openRecent: (filePath) => ipcRenderer.invoke("mrlatte:openRecent", filePath),
+  clearRecent: () => ipcRenderer.invoke("mrlatte:clearRecent"),
+  // A screenshot, saved straight to Pictures/MRLatte; resolves to { filePath }.
+  // revealScreenshot opens it (open=true) or shows it in its folder; only a
+  // path saveScreenshot returned works.
+  saveScreenshot: (base64) => ipcRenderer.invoke("mrlatte:saveScreenshot", { base64 }),
+  revealScreenshot: (filePath, open) => ipcRenderer.invoke("mrlatte:revealScreenshot", { filePath, open }),
   // Generic native "save as" for binary/text (base64 payload).
   saveFile: (defaultName, mime, base64) =>
     ipcRenderer.invoke("mrlatte:saveFile", { defaultName, mime, base64 }),
@@ -71,9 +81,22 @@ contextBridge.exposeInMainWorld("mrlatte", {
   },
   // The app's light/dark choice → native chrome (menus, title bar) and the
   // first loading page; main persists it. Anything but the three modes is dropped.
+  // Preferences ▸ General ▸ Text size: the page's zoom (the whole interface,
+  // the viewer included, which resizes like a window). 0.8–1.5 only.
+  setUiScale: (f) => {
+    const n = Number(f);
+    if (Number.isFinite(n) && n >= 0.8 && n <= 1.5) webFrame.setZoomFactor(n);
+  },
+  // Preferences ▸ Transparency: the OS material behind the page, on or off.
+  setWindowMaterial: (on) => ipcRenderer.send("mrlatte:setWindowMaterial", !!on),
+  // A full repaint of the window (see "mrlatte:repaint" in electron.js).
+  repaint: () => ipcRenderer.send("mrlatte:repaint"),
   setAppearance: (mode) => {
     if (APPEARANCES.includes(mode)) ipcRenderer.send("mrlatte:setAppearance", mode);
   },
+  // The title bar's "MRLatte" button: pop up the application menu at (x, y) in
+  // this window. Main owns the menu; nothing but two numbers crosses.
+  popupAppMenu: (x, y) => ipcRenderer.send("mrlatte:popupAppMenu", { x: Number(x), y: Number(y) }),
   // Standalone header window only (electron.js --header mode): the leading
   // bytes of the file it was launched for. Takes no path — main already
   // knows the one file this window may read.

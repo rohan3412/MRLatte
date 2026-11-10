@@ -108,7 +108,6 @@ function TractRenderingControls({ tractRender, onChange, tractLayers }) {
           disabled={lightingDisabled}
           title={lightingDisabled ? "Enable Pseudotubes or Points geometry to use lighting" : "Toggle headlight shading"}
           icon={Sun}
-          label="Lighting"
           testId="tract-lighting-toggle"
         />
       </div>
@@ -124,10 +123,10 @@ function TractRenderingControls({ tractRender, onChange, tractLayers }) {
           <span className="text-[13px] text-muted-foreground">Crop to slab (2D slices)</span>
           <button
             onClick={() => onChange({ slabMM: DEFAULT_TRACT_RENDER.slabMM })}
-            className="cap text-subtle hover:text-foreground transition-colors"
-            title={`Reset slab thickness to the default (${DEFAULT_TRACT_RENDER.slabMM}mm)`}
+            className="btn-mini"
+            title={`Reset slab thickness to the default (${DEFAULT_TRACT_RENDER.slabMM} mm)`}
             data-testid="tract-slab-reset"
-          >reset</button>
+          >Reset</button>
         </div>
         <div className="flex items-center gap-2">
           <Slider value={[slabMM]} min={0.5} max={50} step={0.5}
@@ -136,7 +135,7 @@ function TractRenderingControls({ tractRender, onChange, tractLayers }) {
             title="Slab thickness applied to the 2D slice views only. The 3D render is never cropped." />
           <EditableNumber value={slabMM} min={0.5} max={50} onCommit={(v) => onChange({ slabMM: v })} label="Crop to slab, mm"
             className="font-mono text-[11px] text-foreground tabular-nums w-12 text-right">
-            {slabMM.toFixed(1)}mm
+            {slabMM.toFixed(1)} mm
           </EditableNumber>
         </div>
       </div>
@@ -298,7 +297,7 @@ export function TractographySection({
   return (
     <SidebarSection title="Tractography" icon={Waypoints} testId="section-tracts" open={open} onOpenChange={onOpenChange}
       badge={tractLayers.filter((l) => l.visible).length}>
-      <FileUploader label="Load tract files" description=".trk .tck .trx .vtk .gii .mz3 · several at once"
+      <FileUploader label="Load tract files" description=".trk .tck .trx .vtk .gii .mz3 .obj .stl .ply · several at once"
         accept=".trk,.tck,.trx,.vtk,.gii,.mz3,.obj,.stl,.ply"
         testId="upload-tract-button" multiple
         onFiles={serialUpload((f) => handleTractUpload(f))}

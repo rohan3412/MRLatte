@@ -3,6 +3,7 @@ import { Image as ImageIcon, Download, RotateCcw } from "lucide-react";
 import { SidebarSection } from "@/components/SidebarSection";
 import LayerControlAdvanced from "@/components/LayerControlAdvanced";
 import FileUploader from "@/components/FileUploader";
+import { DicomProgress } from "@/components/DicomProgress";
 import { Switch } from "@/components/ui/switch";
 import { BASE_VOLUME, NO_BASE } from "@/lib/atlasConfig";
 import { dicomSeriesDownloadUrl } from "@/lib/dicom";
@@ -49,6 +50,8 @@ export function BaseVolumeSection({
   templateMissing,
   layerNotes,
   onNotesChange,
+  baseTransform,
+  handleBaseTransform,
 }) {
   // Fetch-then-save, rather than the plain <a download> this used to be. Every
   // other .nii.gz the app writes out goes through saveBinaryFile, which opens a
@@ -112,7 +115,7 @@ export function BaseVolumeSection({
   return (
     <SidebarSection title="Base volume" icon={ImageIcon} testId="section-base" defaultOpen={true} summary={baseLabel}>
       <LayerControlAdvanced
-        layer={{ id: "mni152", name: baseLabel, description: baseLabel === NO_BASE.name ? NO_BASE.description : BASE_VOLUME.description, fullPath: baseFullPath }}
+        layer={{ id: "mni152", name: baseLabel, description: baseLabel === NO_BASE.name ? NO_BASE.description : baseLabel === BASE_VOLUME.name ? BASE_VOLUME.description : undefined, fullPath: baseFullPath }}
         visible={baseVisible}
         opacity={baseOpacity}
         colormap={baseColormap}
@@ -128,7 +131,10 @@ export function BaseVolumeSection({
         colormapInverted={baseColormapInvert}
         onColormapInvertChange={handleBaseColormapInvert}
         onCalRangeChange={handleBaseCalRange}
+        transform={baseTransform}
+        onTransformChange={handleBaseTransform}
         thresholdLabel="Window"
+        windowSliders
         histogram={histograms.mni152}
         onRequestHistogram={requestHistogram}
         notes={layerNotes?.mni152}
@@ -137,7 +143,7 @@ export function BaseVolumeSection({
       {baseVolumeControls}
       <FileUploader
         label="Use a custom base image"
-        description=".nii .nii.gz .mgz · replaces MNI152"
+        description=".nii .nii.gz .mgz .mif · replaces MNI152"
         testId="upload-base-button"
         onFile={handleBaseUpload}
       />
@@ -150,26 +156,8 @@ export function BaseVolumeSection({
         onFiles={handleDicomImport}
       />
 
-      {/* DICOM staged progress bar */}
-      {dicomProgress && (
-        <div className="space-y-1" data-testid="dicom-progress">
-          <div className="flex justify-between cap text-subtle">
-            <span>
-              {dicomProgress.stage === "upload" ? "Uploading" :
-                dicomProgress.stage === "convert" ? "Converting (dcm2niix)" : "Loading series"}
-            </span>
-            {dicomProgress.stage === "upload" && (
-              <span>{Math.round(dicomProgress.fraction * 100)}%</span>
-            )}
-          </div>
-          <div className="h-1 w-full overflow-hidden rounded-sm bg-panel-active">
-            <div
-              className={`h-full bg-foreground transition-all ${dicomProgress.stage !== "upload" ? "animate-pulse" : ""}`}
-              style={{ width: dicomProgress.stage === "upload" ? `${dicomProgress.fraction * 100}%` : "100%" }}
-            />
-          </div>
-        </div>
-      )}
+      {/* DICOM import progress: upload, convert, download, open */}
+      {dicomProgress && <DicomProgress progress={dicomProgress} />}
 
       {/* DICOM series picker (multi-series studies) */}
       {dicomJob && (

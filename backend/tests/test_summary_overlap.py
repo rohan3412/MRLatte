@@ -162,6 +162,7 @@ def test_client_overlap_model_ignored_when_lqtpy_available(tmp_path, synthetic_a
 
 def test_lqtpy_unavailable_falls_back_to_client_model(tmp_path, synthetic_atlas, monkeypatch):
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     lesion_path = _cube_lesion_path(tmp_path)
     client_model = {"atlasBreakdowns": [{"atlasId": "synth_parcellation", "rows": []}],
                     "provenance": {"engine": "js", "fallback": True, "fallbackReason": "dev"}}
@@ -178,6 +179,7 @@ def test_lqtpy_unavailable_falls_back_to_client_model(tmp_path, synthetic_atlas,
 
 def test_lqtpy_unavailable_no_client_model_runs_without_overlap(tmp_path, synthetic_atlas, monkeypatch):
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     lesion_path = _cube_lesion_path(tmp_path)
     payload = {"atlas_ids": ["synth_parcellation"]}  # no overlapModel sent
     stages = {"overlap": True}

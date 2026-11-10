@@ -510,10 +510,24 @@ def test_uninstall_leaves_the_other_modules_sharing_the_atlases_dir(client, env,
 
 # === 6. Download engine, against a LOCAL http.server =========================
 
+# `python -m http.server`, minus one step: HTTPServer.server_bind resolves its
+# own address (socket.getfqdn) before it listens, and on macOS CI runners that
+# lookup can stall past the fixture's deadline ("http.server never came up").
+_HTTP_SERVER = (
+    "import functools, http.server, socketserver, sys\n"
+    "class Server(http.server.ThreadingHTTPServer):\n"
+    "    def server_bind(self):\n"
+    "        socketserver.TCPServer.server_bind(self)\n"
+    "        self.server_name, self.server_port = self.server_address[:2]\n"
+    "handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[2])\n"
+    "Server(('127.0.0.1', int(sys.argv[1])), handler).serve_forever()\n"
+)
+
+
 @pytest.fixture
 def http_server(tmp_path):
-    """`python -m http.server` on an ephemeral loopback port. Never the public
-    internet, and never port 8001."""
+    """A static file server on an ephemeral loopback port, in its own process.
+    Never the public internet, and never port 8001."""
     serve_dir = tmp_path / "release"
     (serve_dir / "modules-v1").mkdir(parents=True)
 
@@ -522,11 +536,10 @@ def http_server(tmp_path):
         port = s.getsockname()[1]
     assert port > 8100 and port != 8001
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(port),
-         "--bind", "127.0.0.1", "--directory", str(serve_dir)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    log = tmp_path / "http-server.log"
+    with open(log, "wb") as err:
+        proc = subprocess.Popen([sys.executable, "-c", _HTTP_SERVER, str(port), str(serve_dir)],
+                                stdout=subprocess.DEVNULL, stderr=err)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         try:
@@ -534,11 +547,11 @@ def http_server(tmp_path):
                 break
         except OSError:
             if proc.poll() is not None:
-                raise RuntimeError("http.server died on startup")
+                raise RuntimeError(f"http server died on startup: {log.read_text(errors='replace')[-2000:]}")
             time.sleep(0.05)
     else:
         proc.kill()
-        raise RuntimeError("http.server never came up")
+        raise RuntimeError(f"http server never came up: {log.read_text(errors='replace')[-2000:]}")
 
     class Server:
         pass
@@ -734,11 +747,15 @@ def test_non_redistributable_module_is_a_slot_and_cannot_be_downloaded(client, e
     assert r.status_code in (404, 409), r.text
 
 
-def test_python_package_modules_download_their_pinned_files_only(client, env):
-    """reports-figures pins its PyPI files, so the store may download it — but
-    there is nothing to sideload or hash-verify, and one this app did not
-    install is never removed. The install itself is tested offline in
-    test_python_module_install.py; nothing here starts a real download."""
+@pytest.mark.parametrize("platform", ["win_amd64", "macosx_arm64", "macosx_x86_64"])
+def test_python_package_modules_download_their_pinned_files_only(client, env, monkeypatch, platform):
+    """reports-figures pins its PyPI files for every platform the app ships on,
+    so the store may download it — but there is nothing to sideload or
+    hash-verify, and one this app did not install is never removed. The
+    install itself is tested offline in test_python_module_install.py; nothing
+    here starts a real download. The platform is set, not taken from the
+    machine running the tests (which may be one MRLatte doesn't ship on)."""
+    monkeypatch.setattr(mods, "_platform_tag", lambda: platform)
     state = module_state(client, "reports-figures")
     assert state["sideloadable"] is False
     assert state["downloadable"] is True

@@ -89,7 +89,8 @@ export function buildLesionAtlasSection(model) {
       pctOfRegion: `${r.percentOfRegion.toFixed(1)}%`,
     }));
     const keep = Math.min(TOP_ROWS, rows.filter((r) => r.pctOfLesion >= SMALL_REGION_PCT).length);
-    const none = !keep && rows.length ? `<p class="quiet-note">No region covers ${SMALL_REGION_PCT}% of the lesion or more.</p>` : "";
+    const none = !rows.length ? `<p class="quiet-note">The lesion overlaps no region of this atlas.</p>`
+      : !keep ? `<p class="quiet-note">No region covers ${SMALL_REGION_PCT}% of the lesion or more.</p>` : "";
     return `<div class="section-title">${escapeHtml(b.atlasName)}</div>${none}${foldedTableHtml(columns, rows, keep, "region")}`;
   }).join("\n");
   return { title: null, html };
@@ -102,17 +103,18 @@ export function buildFigureSection(title, fig) {
 
 export function buildRetinotopySection(findings) {
   if (!findings?.length) return null;
+  // The map's name already says polar angle or eccentricity; its internal
+  // kind ("polar" / "eccen") isn't a column.
   const rows = findings.map((f) => ({
     name: escapeHtml(f.name),
-    kind: f.kind,
     summary: escapeHtml(f.summary || "—"),
     type: f.illustrative ? "Population template" : "Cortical",
   }));
   const table = dataTableHtml([
-    { key: "name", label: "Map" }, { key: "kind", label: "Kind" },
+    { key: "name", label: "Map" },
     { key: "summary", label: "Summary" }, { key: "type", label: "Type" },
   ], rows);
-  return { title: "Retinotopy Findings", html: table };
+  return { title: "Retinotopy findings", html: table };
 }
 
 // ── Tract dissection ─────────────────────────────────────────────────────────
@@ -245,8 +247,11 @@ export function lqtpyStylesheetCss(reportFragments) {
 }
 
 /** `reportFragments` is lib/lesionReport.js::resolveReportFragments()'s
- * return value (or null/undefined if it was never attempted). */
-export function buildLqtpyFragmentSections(reportFragments) {
+ * return value (or null/undefined if it was never attempted). Streamline
+ * disconnection is shown only with `disconnection: true`, i.e. when Tract
+ * disconnection was ticked and ran; otherwise it isn't part of the report,
+ * not even as a "not available" line. */
+export function buildLqtpyFragmentSections(reportFragments, { disconnection = false } = {}) {
   if (!reportFragments) return [];
   // A section that couldn't be computed is one short line; the reason (often
   // long and repeated per atlas) is folded under "why".
@@ -258,6 +263,7 @@ export function buildLqtpyFragmentSections(reportFragments) {
   const parts = [];
   const names = [];
   for (const kind of LQT_SECTION_ORDER) {
+    if (kind === "disconnection" && !disconnection) continue;
     const html = reportFragments.fragments?.[kind];
     const reason = reportFragments.unavailable?.[kind];
     if (html) {

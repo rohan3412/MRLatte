@@ -207,7 +207,7 @@ export const TractDissectionPanel = ({
   // be noise). Both lesions must be custom-named in "between" mode, since a
   // half-auto half-custom pair has no single clean sentence.
   const deriveDefaultTractName = () => {
-    const fallback = `Tract Dissection · ${new Date().toLocaleTimeString()}`;
+    const fallback = `Tract dissection · ${new Date().toLocaleTimeString()}`;
     if (mode === "between") {
       const a = stripNiftiExt(getFile(lesionFileA, selLesionIdA)?.name);
       const b = stripNiftiExt(getFile(lesionFileB, selLesionIdB)?.name);
@@ -328,6 +328,7 @@ export const TractDissectionPanel = ({
   const { job, setJob, busy, cancelling, cancel: handleCancel } = useJobPoll({
     statusFn: dissectionStatus,
     cancelFn: cancelDissection,
+    notifyLabel: "Tract dissection",
     onCancelled: () => toast.info("Dissection cancelled"),
     onError: (s, curJob) => toast.error(
       curJob.mode === "between" ? "Between-dissection failed" : "Dissection failed",

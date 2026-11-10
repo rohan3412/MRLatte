@@ -27,7 +27,9 @@ const path = require("path");
 // be a private regex duplicated in electron.js's niftiPathFromArgv) — single
 // source of truth for "what MRLatte can open" now lives here. A bare ".gz" is
 // not enough: a .tar.gz (or any other gzip file) is not a NIfTI image.
-const ALLOWED_EXT_RE = /\.(nii|nii\.gz)$/i;
+// MRtrix .mif / .mif.gz open too (the renderer turns them into NIfTI on open,
+// lib/mif.js).
+const ALLOWED_EXT_RE = /\.(nii|nii\.gz|mif|mif\.gz)$/i;
 
 // A leading "\\", "//", or a mix of the two (raw or percent-encoded) is a
 // UNC/network path. Checked before anything else touches the string.

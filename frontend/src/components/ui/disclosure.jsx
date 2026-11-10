@@ -7,9 +7,16 @@ import { cn } from "@/lib/utils"
 // 28 Oct): a title, an optional status on the right of it, and an optional
 // action beside the row that works without opening it (Position's Reset).
 // Folded content stays mounted, only hidden, so what it holds (an overlap
-// table, a half-typed coordinate) survives folding.
-export function Disclosure({ title, status, action, defaultOpen = false, testId, className, bodyClassName = "space-y-2", children }) {
-  const [open, setOpen] = React.useState(defaultOpen)
+// table, a half-typed coordinate) survives folding. `open` / `onOpenChange`
+// make it controlled, for a button elsewhere that opens it.
+export function Disclosure({ title, status, action, defaultOpen = false, open: openProp, onOpenChange, testId, className, bodyClassName = "space-y-2", children }) {
+  const [ownOpen, setOwnOpen] = React.useState(defaultOpen)
+  const open = openProp ?? ownOpen
+  const setOpen = (fn) => {
+    const next = typeof fn === "function" ? fn(open) : fn
+    if (onOpenChange) onOpenChange(next)
+    else setOwnOpen(next)
+  }
   const bodyId = React.useId()
   return (
     <div className={className} data-testid={testId} data-open={open}>
@@ -23,7 +30,7 @@ export function Disclosure({ title, status, action, defaultOpen = false, testId,
           data-testid={testId ? `${testId}-toggle` : undefined}
         >
           <ChevronRight size={14} className={cn("flex-shrink-0 transition-transform", open && "rotate-90")} />
-          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <span className="min-w-0 flex-1 truncate" title={typeof title === "string" ? title : undefined}>{title}</span>
           {status}
         </button>
         {action}

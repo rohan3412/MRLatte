@@ -66,7 +66,7 @@ function buildPolarAngleDiscCanvas({
   ctx.textBaseline = 'top';
   ctx.font = 'bold 16px monospace';
   ctx.fillStyle = '#111111';
-  ctx.fillText('Predicted Visual Field Defect', W / 2, 20);
+  ctx.fillText('Predicted visual field defect', W / 2, 20);
 
   const cx = W / 2;
   const cy = 270; // shifted down 50px to clear the title

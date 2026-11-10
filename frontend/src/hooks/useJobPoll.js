@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
+import { notifyIfAway } from "@/lib/notify";
 
 /**
  * Owns the poll lifecycle shared by every background-job panel (Tract
@@ -29,7 +30,9 @@ import { toast } from "sonner";
  *   state and lets a Report/Download action stay reachable after the job finishes.
  * @returns {{ job: object|null, setJob: Function, busy: boolean, cancelling: boolean, cancel: () => Promise<void> }}
  */
-export function useJobPoll({ statusFn, cancelFn, intervalMs = 1500, onCancelled, onError, onDone, keepDoneState = false }) {
+// `notifyLabel` (optional): the job's name for a system notification when it
+// ends while MRLatte isn't in front (lib/notify.js).
+export function useJobPoll({ statusFn, cancelFn, intervalMs = 1500, onCancelled, onError, onDone, keepDoneState = false, notifyLabel }) {
   const [job, setJob] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef(null);
@@ -50,10 +53,12 @@ export function useJobPoll({ statusFn, cancelFn, intervalMs = 1500, onCancelled,
           return;
         }
         if (s.error) {
+          if (notifyLabel) notifyIfAway(`${notifyLabel} failed`, "Open MRLatte to see why.");
           onError?.(s, job);
           setJob(null);
           return;
         }
+        if (notifyLabel) notifyIfAway(`${notifyLabel} finished`, "The result is ready in MRLatte.");
         try {
           await onDone?.(s, job);
         } finally {

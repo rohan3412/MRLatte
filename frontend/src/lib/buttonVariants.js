@@ -13,10 +13,12 @@ export const panelSelectCls = "field w-full";
 export const primaryBtnCls = "btn-primary flex w-full gap-2 px-3 py-2";
 
 /**
- * Returns className string for a binary active/inactive toggle button.
+ * Returns className string for a selectable chip or choice button. Chosen is
+ * the Crema selection look (tint + line), not the raised neutral: on a card in
+ * the dark theme the neutral was too close to unchosen to read (inbox 2 Nov).
  * @param {boolean} active
  */
 export const activeToggleCls = (active) =>
   active
-    ? "bg-panel-active text-foreground border-edge"
+    ? "bg-crema-tint text-foreground border-crema-line"
     : "bg-transparent text-muted-foreground border-edge hover:text-foreground hover:bg-panel-hover";

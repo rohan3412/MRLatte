@@ -5,6 +5,7 @@ import {
   AlignVerticalSpaceAround, Target, Crosshair, Download, Box, Square, Eraser, Scissors, ChevronDown, ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLesionEngine } from "@/hooks/use-modules";
 import { Slider } from "@/components/ui/slider";
 import { EditableNumber } from "@/components/ui/editable-number";
 import FileUploader from "@/components/FileUploader";
@@ -15,7 +16,7 @@ import { ghostBtnCls } from "@/lib/buttonVariants";
 import { BASE_VOLUME } from "@/lib/atlasConfig";
 import { runLesionQc, applyQcFix } from "@/lib/lesionQc";
 import { undoToastOptions } from "@/lib/undoToast";
-import { LesionQcDialog } from "@/components/LesionQcDialog";
+import { LesionQcDialog, findingMM } from "@/components/LesionQcDialog";
 import { OverlayTransformControls } from "@/components/OverlayTransformControls";
 import { IDENTITY_TRANSFORM } from "@/lib/overlayTransform";
 
@@ -51,6 +52,8 @@ export const DrawingPanel = ({
   // mount, sees the flag, and acts — then clears it so a later manual
   // open/close of the section never replays it.
   drawTogglePending = false, onDrawToggleHandled,
+  // The task toolbar's Tracing set (Dashboard) shows these; its buttons press this panel's own.
+  onTaskState,
 }) => {
   const [enabled, setEnabled] = useState(false);
   // "pen" | "brush": pen uses niivue's native pipeline; brush uses our own
@@ -82,6 +85,9 @@ export const DrawingPanel = ({
   // the adjustment since the drawing last changed any other way.
   const [drawMove, setDrawMove] = useState(IDENTITY_TRANSFORM);
   const [canRedo, setCanRedo] = useState(false);
+  // What Undo / Redo would do, shown on hover (inbox 2 Nov).
+  const [undoLabel, setUndoLabel] = useState(null);
+  const [redoLabel, setRedoLabel] = useState(null);
   // Spherical-ROI sub-tool — paints a sphere into the SAME drawing bitmap.
   const [sphere, setSphere] = useState({ x: "0", y: "0", z: "0", r: "5" });
   // Name for the next saved object.
@@ -128,6 +134,7 @@ export const DrawingPanel = ({
   // one before Save and the idle one. Shows everything lqtpy says, Notes too.
   const [qcManual, setQcManual] = useState(null); // { flags, verdict, lesionId } | null
   const [qcChecking, setQcChecking] = useState(false);
+  const lesionEngine = useLesionEngine();
   const checkDrawing = async () => {
     const file = await currentDrawingAsFile(viewerRef, "qc_drawing.nii.gz");
     if (!file) { toast.info("Nothing drawn yet"); return; }
@@ -138,7 +145,14 @@ export const DrawingPanel = ({
       toast.error("The quality check couldn't run", { description: "lqtpy isn't available in this backend, or the check took too long." });
       return;
     }
-    if (!r.flags.length) { toast.success("No issues found", { description: r.verdict ? `Overall: ${r.verdict}` : undefined }); return; }
+    if (!r.flags.length) {
+      toast.success("No issues found", { description: r.verdict ? `Overall: ${r.verdict}` : undefined });
+      viewerRef.current?.fxRingAroundDrawing?.();
+      return;
+    }
+    // The viewer glides to the first finding that has a place, behind the list.
+    const first = r.flags.map(findingMM).find(Boolean);
+    if (first) viewerRef.current?.fxGlideTo?.(first);
     setQcManual(r);
   };
   const requestQcConfirmation = (file, actionLabel) => new Promise((resolve) => {
@@ -254,9 +268,11 @@ export const DrawingPanel = ({
       setResolvedOrientation(info?.resolvedOrientation ?? null);
       setValidOrientations(info?.validOrientations ?? [false, false, false]);
     });
-    viewer?.setHistoryCallback?.(({ canUndo: u, canRedo: r }) => {
+    viewer?.setHistoryCallback?.(({ canUndo: u, canRedo: r, undoLabel: ul, redoLabel: rl }) => {
       setCanUndo(!!u);
       setCanRedo(!!r);
+      setUndoLabel(ul || null);
+      setRedoLabel(rl || null);
       // Any edit other than a move restarts the position block at zero.
       setDrawMove(viewer?.getDrawingTransform?.() || IDENTITY_TRANSFORM);
     });
@@ -354,6 +370,15 @@ export const DrawingPanel = ({
   useEffect(() => {
     if (!editNonce) return;
     setSaveName(editingSaveName || "");
+    // Edit puts the viewer straight into paint mode (loadDrawingFromVolume),
+    // bypassing enterDrawing, so hand off the crosshair here the same way:
+    // off now, back on when drawing ends (inbox 2 Nov). Reads the viewer, not
+    // `enabled`: the viewer tells this panel about paint mode one effect later.
+    const painting = !!viewerRef.current?.getNiivue?.()?.opts?.drawingEnabled;
+    if (painting && crosshair && !didAutoOffCrosshairRef.current) {
+      didAutoOffCrosshairRef.current = true;
+      onCrosshairOff?.();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editNonce]);
 
@@ -491,6 +516,10 @@ export const DrawingPanel = ({
     await saveBinaryFile(`${name}.nii.gz`, "application/gzip", await file.arrayBuffer());
   };
 
+  useEffect(() => {
+    onTaskState?.({ penValue, canUndo, canRedo, canInterpolate, saving, brushRadius });
+  }, [onTaskState, penValue, canUndo, canRedo, canInterpolate, saving, brushRadius]);
+
   const tools = [
     { id: "pen",   icons: [Pencil, Scissors], label: "Pen / cutout" },
     { id: "brush", icons: [Brush, Eraser],  label: "Brush / eraser" },
@@ -548,7 +577,7 @@ export const DrawingPanel = ({
         onClick={toggleEnabled}
         className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-[12.5px] font-medium transition-colors border ${
           enabled
-            ? "bg-panel-active text-foreground border-edge"
+            ? "bg-crema-tint text-foreground border-crema-line"
             : "bg-transparent text-foreground border-border hover:border-muted-foreground"
         }`}
         data-testid="drawing-toggle"
@@ -580,15 +609,17 @@ export const DrawingPanel = ({
             <React.Fragment key={t.id}>
               <button
                 onClick={() => changeTool(t.id)}
-                className={`min-w-0 flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium transition-colors border ${
+                className={`fit-label min-w-0 flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium transition-colors border ${
                   active
                     ? "bg-panel-active text-foreground border-edge"
                     : "bg-transparent text-muted-foreground border-border hover:text-foreground hover:border-muted-foreground"
                 }`}
                 data-testid={`pen-${t.id}`}
+                title={t.label}
+                aria-label={t.label}
               >
                 {React.createElement(t.icons[0], { size: 11, className: "flex-shrink-0" })}
-                <span className="truncate">{t.label}</span>
+                <span className="fit-full truncate">{t.label}</span>
                 {React.createElement(t.icons[1], { size: 11, className: "flex-shrink-0 opacity-60" })}
               </button>
               {/* 2D/3D brush mode toggle — after the Brush button */}
@@ -624,12 +655,10 @@ export const DrawingPanel = ({
       {/* Brush radius (voxels 1..30) — shown whenever Brush tool is active.
           Controls both 3D sphere and 2D circle stamp radius. */}
       {tool === "brush" && (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] text-muted-foreground">Brush radius</span>
-            <EditableNumber value={brushRadius} min={1} max={30} integer onCommit={changeBrushRadius} label="Brush radius, voxels"
-              className="font-mono text-[11px] text-foreground tabular-nums">{brushRadius} vox</EditableNumber>
-          </div>
+        <div className="radius-row flex items-center gap-2" data-testid="brush-radius-row">
+          <span className="flex-shrink-0 text-[13px] text-muted-foreground" title="Brush radius (voxels)">
+            <span className="rr-full">Brush radius</span><span className="rr-short">Radius</span>
+          </span>
           <Slider
             value={[brushRadius]}
             min={1}
@@ -637,8 +666,11 @@ export const DrawingPanel = ({
             step={1}
             onValueChange={(v) => changeBrushRadius(v[0])}
             aria-label="Brush radius"
+            className="min-w-0 flex-1"
             data-testid="brush-radius-slider"
           />
+          <EditableNumber value={brushRadius} min={1} max={30} integer onCommit={changeBrushRadius} label="Brush radius, voxels"
+            className="flex-shrink-0 font-mono text-[11px] text-foreground tabular-nums">{brushRadius}</EditableNumber>
         </div>
       )}
 
@@ -740,23 +772,28 @@ export const DrawingPanel = ({
         <button
           onClick={() => viewerRef.current?.interpolateDrawnSlices?.()}
           disabled={!canInterpolate}
-          className="btn flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-foreground disabled:hover:border-border"
+          className="btn fit-label flex min-w-0 items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-foreground disabled:hover:border-border"
           data-testid="draw-interpolate"
           title="Fill the gap between the last two slices you drew in the same view (axial/coronal/sagittal)"
+          aria-label="Interpolate last 2"
         >
-          <AlignVerticalSpaceAround size={11} />
-          Interpolate last 2
+          <AlignVerticalSpaceAround size={11} className="shrink-0" />
+          <span className="fit-full truncate">Interpolate last 2</span>
+          <span className="fit-short">Last 2</span>
         </button>
         <div className="relative flex" ref={interpolateMenuRef}>
           <button
             onClick={() => viewerRef.current?.interpolateAllDrawnSlices?.()}
             disabled={!canInterpolateAll}
-            className="btn min-w-0 flex-1 gap-1.5 rounded-r-none"
+            className="btn fit-label-lg min-w-0 flex-1 gap-1.5 rounded-r-none"
             data-testid="draw-interpolate-all"
             title={`Fill between every pair of adjacent drawn slices in the ${orientationLabel} view (Shift+I)`}
+            aria-label={`Interpolate all (${orientationLabel})`}
           >
             <AlignVerticalSpaceAround size={11} className="shrink-0" />
-            <span className="truncate">{`Interpolate all (${orientationLabel})`}</span>
+            <span className="fit-full truncate">{`Interpolate all (${orientationLabel})`}</span>
+            <span className="fit-mid truncate">{`All (${orientationLabel})`}</span>
+            <span className="fit-short">All</span>
           </button>
           <button
             onClick={() => setInterpolateMenuOpen((o) => !o)}
@@ -837,10 +874,10 @@ export const DrawingPanel = ({
 
       {/* Undo / Redo */}
       <div className="grid grid-cols-2 gap-1.5">
-        <button onClick={() => viewerRef.current?.drawUndo()} disabled={!canUndo} className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium btn disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground disabled:hover:border-border" data-testid="drawing-undo" title="Undo (Ctrl+Z)">
+        <button onClick={() => viewerRef.current?.drawUndo()} disabled={!canUndo} className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium btn disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground disabled:hover:border-border" data-testid="drawing-undo" title={undoLabel ? `Undo: ${undoLabel} (Ctrl+Z)` : "Undo (Ctrl+Z)"}>
           <Undo2 size={11} />Undo
         </button>
-        <button onClick={() => viewerRef.current?.drawRedo()} disabled={!canRedo} className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium btn disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground disabled:hover:border-border" data-testid="drawing-redo" title="Redo (Ctrl+Shift+Z)">
+        <button onClick={() => viewerRef.current?.drawRedo()} disabled={!canRedo} className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium btn disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground disabled:hover:border-border" data-testid="drawing-redo" title={redoLabel ? `Redo: ${redoLabel} (Ctrl+Shift+Z)` : "Redo (Ctrl+Shift+Z)"}>
           <Redo2 size={11} />Redo
         </button>
       </div>
@@ -883,13 +920,15 @@ export const DrawingPanel = ({
             <Download size={11} />Download
           </button>
           <button
-            onClick={checkDrawing}
+            onClick={lesionEngine.missing ? lesionEngine.install : checkDrawing}
             disabled={qcChecking}
             className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium btn disabled:opacity-50"
-            title="Check the drawing with lqtpy now: stray specks, skipped slices, parts outside the brain…"
+            title={lesionEngine.missing
+              ? "The quality check needs the LQTpy module. Opens the module store at it."
+              : "Check the drawing with lqtpy now: stray specks, skipped slices, parts outside the brain…"}
             data-testid="drawing-qc-check"
           >
-            <ShieldCheck size={11} />{qcChecking ? "Checking…" : "Check drawing"}
+            <ShieldCheck size={11} />{lesionEngine.missing ? "Install LQTpy…" : qcChecking ? "Checking…" : "Check drawing"}
           </button>
         </div>
       </div>

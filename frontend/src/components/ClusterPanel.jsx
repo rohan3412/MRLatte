@@ -3,13 +3,19 @@ import { Switch } from "@/components/ui/switch";
 import { Sigma, Download, Activity, Crosshair } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { EditableNumber } from "@/components/ui/editable-number";
-import { findClusters, clustersToCSV, downloadText } from "@/lib/volumeAnalysis";
+import { findClusters, clustersToCSV, downloadText, nativeDims, nativeMMToVox } from "@/lib/volumeAnalysis";
 import { toast } from "sonner";
 
 // `bare`: no heading or rule of its own, for a caller that folds it under one.
-export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], atlasRegions, ensureAtlasLoaded, onSelectAtlas, bare = false }) => {
-  const [layerId, setLayerId] = useState("");
-  const [labelAtlasId, setLabelAtlasId] = useState(atlasOptions[0]?.id || "");
+// `layerId` / `onLayerChange`: optional, to let the caller choose the map (a
+// map card's Clusters… button); without them the panel keeps its own choice.
+export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], atlasRegions, ensureAtlasLoaded, onSelectAtlas, bare = false, layerId: layerIdProp, onLayerChange }) => {
+  const [ownLayerId, setOwnLayerId] = useState("");
+  const layerId = layerIdProp ?? ownLayerId;
+  const setLayerId = onLayerChange ?? setOwnLayerId;
+  // Nothing chosen runs on the first map, so the chooser shows that one.
+  const shownLayerId = layerId || activationLayers[0]?.id || "";
+  const [labelAtlasId, setLabelAtlasId] = useState(""); // an atlas only names regions once it is loaded (choosing one loads it)
   const [threshold, setThreshold] = useState(2.3);
   const [minSize, setMinSize] = useState(10);
   const [sign, setSign] = useState("pos");
@@ -19,7 +25,7 @@ export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], a
 
   const toggleColorbar = (next) => {
     setColorbarOn(next);
-    if (layerId) viewerRef.current?.setOverlayColorbarVisible(layerId, next);
+    if (shownLayerId) viewerRef.current?.setOverlayColorbarVisible(shownLayerId, next);
   };
 
   // Rescale niivue-normalized img values back to true physical units
@@ -32,14 +38,17 @@ export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], a
     return cmn + (normalizedVal / 255) * (cmx - cmn);
   };
 
-  // Look up region label at a peak voxel using the chosen atlas
-  const peakLabelLookup = (peakVox) => {
+  // Look up the region at a cluster's peak in the chosen atlas, by the peak's
+  // world position, so the map and the atlas needn't share a grid.
+  const peakLabelLookup = (peakMM) => {
     const nv = viewerRef.current?.getNiivue();
     if (!nv) return null;
     const atlas = nv.volumes.find((v) => v?.name === labelAtlasId);
-    if (!atlas?.img || !atlas?.dimsRAS) return null;
-    const [, nx, ny] = atlas.dimsRAS;
-    const [i, j, k] = peakVox.map((n) => Math.round(n));
+    const dims = atlas?.img && nativeDims(atlas);
+    if (!dims) return null;
+    const [nx, ny, nz] = dims;
+    const [i, j, k] = nativeMMToVox(atlas, peakMM).map((n) => Math.round(n));
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return null;
     const idx = i + nx * (j + ny * k);
     const val = Math.round(atlas.img[idx] || 0);
     const region = (atlasRegions?.[labelAtlasId] || []).find((r) => r.value === val);
@@ -49,7 +58,7 @@ export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], a
   const runAnalysis = () => {
     const nv = viewerRef.current?.getNiivue();
     if (!nv) return;
-    const id = layerId || activationLayers[0]?.id;
+    const id = shownLayerId;
     if (!id) return toast.error("No activation map selected");
     const vol = nv.volumes.find((v) => v?.name === id);
     if (!vol) return toast.error("Layer not loaded");
@@ -103,7 +112,7 @@ export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], a
   };
 
   // For displayed table: lookup label live so user sees them inline
-  const labelForCluster = (c) => peakLabelLookup(c.peakVox);
+  const labelForCluster = (c) => peakLabelLookup(c.peakMM);
 
   // One "label · control" row, as on the other panels.
   const rowLabel = "w-[112px] flex-shrink-0 text-[13px] text-muted-foreground";
@@ -119,7 +128,7 @@ export const ClusterPanel = ({ viewerRef, activationLayers, atlasOptions = [], a
 
       <div className="flex items-center gap-2">
         <span className={rowLabel}>Map</span>
-        <select value={layerId} onChange={(e) => setLayerId(e.target.value)}
+        <select value={shownLayerId} onChange={(e) => setLayerId(e.target.value)}
           className="field min-w-0 flex-1 font-mono"
           data-testid="cluster-layer-select">
           <option value="">— select activation map —</option>

@@ -1,8 +1,8 @@
 import React from "react";
 import { Download, Package } from "lucide-react";
-import { useCapability, useModulesFor, useModuleStore } from "@/hooks/use-modules";
+import { useCapability, useModules, useModulesFor, useModuleStore } from "@/hooks/use-modules";
 import { useAtlasManager } from "@/hooks/use-atlases";
-import { moduleSize, isRedistributable } from "@/lib/modules";
+import { moduleSize, isRedistributable, toInstallFor } from "@/lib/modules";
 
 /**
  * Install prompt shown in place of a feature whose backing module is absent.
@@ -19,7 +19,8 @@ export function ModuleInstallPrompt({ capability, label }) {
   // Atlases and the template (modules with a `group`) live in the Atlas Manager.
   const { openManager } = useAtlasManager();
   const open = (m) => (m.group ? openManager(m.id) : openStore(m.id));
-  const missing = candidates.filter((m) => !m.installed);
+  const { modules: allModules } = useModules();
+  const missing = toInstallFor(candidates, allModules);
   const shown = missing.length ? missing : candidates;
 
   return (
@@ -53,19 +54,19 @@ export function ModuleInstallPrompt({ capability, label }) {
             type="button"
             onClick={() => open(m)}
             title={isRedistributable(m)
-              ? "Open the module store to install this module."
-              : "Not redistributable — the store explains how to obtain and sideload it."}
-            className="btn w-full flex items-center justify-center gap-1.5 cap text-subtle"
+              ? `Open the ${m.group ? "atlas manager" : "module store"} to install this module.`
+              : `Not redistributable: the ${m.group ? "atlas manager" : "module store"} explains how to obtain and sideload it.`}
+            className="btn w-full flex items-center justify-center gap-1.5"
             data-testid={`module-install-${m.id}`}
           >
             <Download size={11} />
-            {isRedistributable(m) ? `Install (${moduleSize(m)})` : `Sideload (${moduleSize(m)})`}
+            {(isRedistributable(m) ? "Install" : "Sideload") + (moduleSize(m) === "unknown size" ? "" : ` · ${moduleSize(m)}`)}
           </button>
         </div>
       ))}
 
       <div className="text-[11.5px] text-subtle leading-relaxed">
-        Opens the {shown.some((m) => m.group) ? "Atlas Manager" : "module store"}, where
+        Opens the {shown.some((m) => m.group) ? "atlas manager" : "module store"}, where
         a module can be downloaded (when its licence allows) or sideloaded from a
         file you already have.
       </div>

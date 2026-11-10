@@ -96,7 +96,12 @@ export function createVolumeApi(ctx, {
     nvRef, volumeMap, meshMap, hiddenLabelLayers, baseFileRef,
     measurementMeshRef, measurementPointsRef, lastDraws, drawHistory,
   } = ctx;
-  const pivotVolume = (id) => findVolume(id).vol;
+  // Re-run the crosshair readout after a layer comes or goes, so its values
+  // list the layers shown now, not those shown at the last click.
+  const reemit = (nv) => { try { nv.createOnLocationChange(); } catch (_e) {} };
+  // The base volume's row is always "mni152", whatever scan it holds, and it
+  // is always nv.volumes[0] (it isn't in volumeMap).
+  const pivotVolume = (id) => (id === "mni152" ? nvRef.current?.volumes?.[0] || null : findVolume(id).vol);
 
   return {
     replaceBaseVolume: async (file) => {
@@ -186,6 +191,8 @@ export function createVolumeApi(ctx, {
         }
 
         baseFileRef.current = file;
+        // The readout's values belong to the old base until the crosshair moves.
+        reemit(nv);
         toast.success("Base volume replaced", { description: file.name });
         return true;
       } catch (err) {
@@ -320,6 +327,7 @@ export function createVolumeApi(ctx, {
           }
           volumeMap.current.set(layerCfg.id, vol);
         }
+        if (vol) reemit(nv);
         return vol;
       } catch (err) {
         if (layerCfg.quiet) console.warn(`[overlay] optional layer ${layerCfg.id} unavailable:`, err?.message);
@@ -435,6 +443,7 @@ export function createVolumeApi(ctx, {
           }
           volumeMap.current.set(id, vol);
         }
+        if (vol) reemit(nv);
         return vol;
       } catch (err) {
         toast.error(`Failed to load ${file.name}`, { description: err?.message });
@@ -456,6 +465,7 @@ export function createVolumeApi(ctx, {
           nv.updateGLVolume();
           nv.drawScene();
         } catch (_e) { /* best-effort */ }
+        reemit(nv);
       }
       volumeMap.current.delete(id);
     },
@@ -501,6 +511,7 @@ export function createVolumeApi(ctx, {
         nv.updateGLVolume();
         nv.drawScene();
       } catch (_e) {}
+      reemit(nv);
     },
 
     setOverlayOpacity: (id, opacity) => {
@@ -706,6 +717,18 @@ export function createVolumeApi(ctx, {
     setOverlayTransform: (id, transform) => {
       const { vol, idx } = findVolume(id);
       return applyManualTransform(nvRef.current, vol, idx, transform);
+    },
+
+    // Same, for the base volume (always nv.volumes[0]). Overlays and atlases
+    // keep their world position, so this is how a scan that sits off the
+    // template gets nudged under them. The drawing lives on the base's voxel
+    // grid and therefore moves with it; its export picks the adjusted affine
+    // up in drawingApi.getDrawingBytes. Nothing is rewritten on disk: the
+    // base's file keeps its own position, and a workspace stores the
+    // adjustment next to it.
+    setBaseTransform: (transform) => {
+      const nv = nvRef.current;
+      return applyManualTransform(nv, nv?.volumes?.[0], 0, transform);
     },
 
     // Turn pivot of a layer ("centre" / "mass" of its visible voxels), in the
@@ -961,6 +984,7 @@ export function createVolumeApi(ctx, {
           resetOverlayTexture();
           nv.updateGLVolume();
           nv.drawScene();
+          reemit(nv);
         }
       } catch (_e) { /* best-effort */ }
     },

@@ -1,0 +1,102 @@
+# Builds and smoke-tests the core Windows installer (what build-minimal.bat
+# makes on a dev PC), alongside the macOS build: tools/build/assemble-bundle.ps1
+# (the bundle), tools/build/ensure-wincodesign.ps1, yarn dist:win (the NSIS
+# installer), tools/build/win-smoke-test.sh (backend, packaging, launch and
+# quit) and tools/build/ui-smoke.mjs (the window itself: 2D and 3D drawn, a
+# file opened like a double-click, a drawing saved, a report made; screenshots
+# attached to the run).
+#
+# The installer is attached to each run as an artifact (kept 14 days). It is
+# unsigned, like the ones built by hand.
+name: Windows build
+
+on:
+  # Every push, except ones that only touch documentation.
+  push:
+    branches: [macos, main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Installer (x64, minimal)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      # No code-signing certificate: electron-builder must not look for one.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      # assemble-bundle.ps1 runs pip through the `py -3.11` launcher.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the Python launcher
+        run: py -3.11 --version
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22: the on-screen test uses its built-in WebSocket.
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Cache pinned downloads
+        uses: actions/cache@v4
+        with:
+          path: tools/build/downloads
+          key: downloads-win-x64-${{ hashFiles('tools/build/assemble-bundle.ps1') }}
+
+      - name: Assemble the bundle
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\build\assemble-bundle.ps1
+
+      - name: Smoke test the bundle
+        shell: bash
+        run: bash tools/build/win-smoke-test.sh bundle
+
+      - name: Put electron-builder's exe tool in place
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\build\ensure-wincodesign.ps1
+
+      - name: Package the installer
+        working-directory: frontend
+        run: yarn dist:win
+
+      - name: Smoke test the app
+        shell: bash
+        run: bash tools/build/win-smoke-test.sh app
+
+      - name: On-screen test
+        shell: bash
+        run: node tools/build/ui-smoke.mjs ../MRLatte-build/electron/win-unpacked/MRLatte.exe ui-shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots-win-x64
+          path: ui-shots
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # upload-artifact only takes paths inside the workspace; the build output
+      # sits beside the repo (package.json directories.output).
+      - name: Collect the installer
+        shell: bash
+        run: mkdir -p dist && cp ../MRLatte-build/electron/MRLatte-Setup-*-mini-x64.exe dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRLatte-win-x64-minimal
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 14

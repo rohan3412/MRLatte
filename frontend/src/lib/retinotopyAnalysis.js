@@ -6,7 +6,7 @@
 // Reuses voxel-grid math (getDims, voxToMM, mmToVox) from volumeAnalysis.js
 // so the affine-aware path is identical to computeAtlasOverlap.
 
-import { getDims, voxToMM, mmToVox } from "./volumeAnalysis";
+import { getDims, voxToMM, mmToVox, sameVoxelGrid } from "./volumeAnalysis";
 
 /**
  * Per-lesion: Map<int, int> from rounded atlas voxel value → lesion voxel count.
@@ -22,8 +22,7 @@ export function computeVoxelCounts(lesionVol, atlasVol) {
   const [anx, any, anz] = aDims;
   const lImg = lesionVol.img;
   const aImg = atlasVol.img;
-  const sameGrid =
-    lnx === anx && lny === any && lnz === anz && lImg.length >= lnx * lny * lnz;
+  const sameGrid = sameVoxelGrid(lesionVol, atlasVol) && lImg.length >= lnx * lny * lnz;
 
   const bump = (key) => out.set(key, (out.get(key) || 0) + 1);
 
@@ -197,8 +196,8 @@ export function computeVoxelCounts2D(lesionVol, polarAtlasVol, eccenAtlasVol, { 
   const paImg = polarAtlasVol.img;
   const eImg = eccenAtlasVol.img;
 
-  const paAtlasesSameGrid = panx === eDims[0] && pany === eDims[1] && panz === eDims[2];
-  const allSameGrid = lnx === panx && lny === pany && lnz === panz && paAtlasesSameGrid;
+  const paAtlasesSameGrid = sameVoxelGrid(polarAtlasVol, eccenAtlasVol);
+  const allSameGrid = sameVoxelGrid(lesionVol, polarAtlasVol) && paAtlasesSameGrid;
 
   if (allSameGrid) {
     const N = lnx * lny * lnz;

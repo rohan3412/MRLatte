@@ -132,7 +132,8 @@ function OwnAtlasRow({ atlas: a, copies, onChanged }) {
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-ok" title="Installed" />
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-medium text-foreground leading-snug truncate">{a.name}</div>
-          <div className="text-[12px] text-muted-foreground leading-snug truncate">
+          <div className="text-[12px] text-muted-foreground leading-snug truncate"
+            title={`${a.kind}${a.tracts4d ? " (with per-region maps)" : ""} · ${from}${a.license?.attribution ? ` · ${a.license.attribution}` : ""}`}>
             {a.kind}{a.tracts4d ? " (with per-region maps)" : ""} · {from}
             {a.license?.attribution ? ` · ${a.license.attribution}` : ""}
           </div>
@@ -172,7 +173,8 @@ function CatalogRow({ entry: c, job, onInstall }) {
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full border border-muted-foreground" title="Not installed" />
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-medium text-foreground leading-snug truncate">{c.name}</div>
-          <div className="text-[12px] text-muted-foreground leading-snug truncate">
+          <div className="text-[12px] text-muted-foreground leading-snug truncate"
+            title={`${c.description}${c.license?.attribution ? ` · ${c.license.attribution}` : ""}`}>
             {c.description}{c.license?.attribution ? ` · ${c.license.attribution}` : ""}
           </div>
         </div>
@@ -303,7 +305,7 @@ export function AtlasManager({ onChanged }) {
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Layers size={15} className="text-muted-foreground" />
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] font-medium text-foreground leading-none">Atlas Manager</div>
+            <div className="text-[14px] font-medium text-foreground leading-none">Atlas manager</div>
             <div className="mt-1 text-[12px] text-muted-foreground">
               {installedCount} installed · each one is added and removed on its own
               {freeBytes !== null && freeBytes !== undefined && <> · {formatBytes(freeBytes)} free</>}

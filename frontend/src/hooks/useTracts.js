@@ -123,7 +123,7 @@ export function useTracts({
         const sizeLabel = `${(file.size / 1024).toFixed(1)} KB`;
         setTractLayers((p) => [
           ...p,
-          { id, name: `Tract · ${file.name}`, visible: true, opacity: 1.0,
+          { id, name: file.name, visible: true, opacity: 1.0,
             color: `rgb(${rgba[0]},${rgba[1]},${rgba[2]})`,
             colorMode: colorByDirection ? "direction" : "palette",
             solidColor: "#c8c8c8",

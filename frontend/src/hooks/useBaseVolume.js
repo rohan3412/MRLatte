@@ -3,6 +3,8 @@ import { dicomSourceOf } from "@/lib/dicomSource";
 import { toast } from "sonner";
 import { BASE_VOLUME } from "@/lib/atlasConfig";
 import { convertDicom, fetchDicomSeriesFile } from "@/lib/dicom";
+import { normalizeTransform, isIdentityTransform } from "@/lib/overlayTransform";
+import { niftiFileFor } from "@/lib/mif";
 
 /**
  * Base volume upload / reset, DICOM import, and base-window/colormap/opacity
@@ -51,13 +53,29 @@ export function useBaseVolume({
   // again instead of carrying the converted volume. Null for any other base.
   const [baseDicom, setBaseDicom] = useState(null);
   const dicomSourceRef = useRef(null);
+  // Manual move / turn / size of the base (lib/overlayTransform.js; inbox
+  // 4 Nov, back after 23 Oct took it out). Lives as long as this base does:
+  // every path that swaps the base clears it, since the new scan starts from
+  // its own file position. Saved in workspaces next to the base.
+  const [baseTransform, setBaseTransform] = useState(undefined);
+  const handleBaseTransform = (_, t) => {
+    const next = normalizeTransform(t);
+    if (!viewerRef.current?.setBaseTransform?.(next)) return;
+    // Unmoved is dropped, unless it carries a chosen turn pivot (as layers do).
+    setBaseTransform(isIdentityTransform(next) && !next.pivot ? undefined : next);
+  };
   // opts.fullPath: where the file is on disk when the File itself can't say
   // (a file rebuilt from bytes — e.g. reopened from a workspace link).
   const handleBaseUpload = async (file, opts = {}) => {
     setBaseLoading(true);
     try {
+      // A .mif is turned into a NIfTI first (lib/mif.js); the label keeps the
+      // NIfTI name, the path (for workspace links) the .mif's.
+      file = await niftiFileFor(file);
       const ok = await viewerRef.current?.replaceBaseVolume(file);
       if (ok) {
+        viewerRef.current?.fxDevelop?.();
+        setBaseTransform(undefined);
         setBaseDicom(null);
         setBaseLabel(file.name);
         setBaseFullPath(opts.fullPath || window.mrlatte?.getPathForFile?.(file) || null);
@@ -75,6 +93,7 @@ export function useBaseVolume({
   // avoid fetching+rendering MNI152 first just to immediately replace it —
   // so there's nothing to call replaceBaseVolume with here).
   const markBaseLoadedExternally = (name, fullPath) => {
+    setBaseTransform(undefined);
     setBaseDicom(null);
     setBaseLabel(name);
     setBaseFullPath(fullPath || null);
@@ -90,13 +109,17 @@ export function useBaseVolume({
     dicomSourceRef.current = opts.source || dicomSourceOf(fileArr);
     setDicomJob(null);
     setDicomDownload(null);
-    setDicomProgress({ stage: "upload", fraction: 0 });
+    // The steps and their numbers: lib/dicomProgress.js.
+    const files = fileArr.length;
+    const total = fileArr.reduce((n, f) => n + (f.size || 0), 0);
+    setDicomProgress({ stage: "upload", loaded: 0, total, files });
     try {
-      const res = await convertDicom(fileArr, (f) =>
-        setDicomProgress({ stage: "upload", fraction: f }),
+      const res = await convertDicom(
+        fileArr,
+        (_f, loaded, sent) => setDicomProgress({ stage: "upload", loaded, total: sent, files }),
+        // Every byte sent: dcm2niix runs on the engine now (no percentage exists).
+        () => setDicomProgress({ stage: "convert", files, since: Date.now() }),
       );
-      // Upload done — dcm2niix runs server-side (indeterminate).
-      setDicomProgress({ stage: "convert", fraction: 1 });
       const series = res?.series || [];
       if (series.length === 0) {
         setDicomProgress(null);
@@ -120,11 +143,15 @@ export function useBaseVolume({
   };
 
   const loadDicomSeries = async (jobId, s) => {
-    setDicomProgress({ stage: "load", fraction: 1 });
+    setDicomProgress({ stage: "download", loaded: 0, total: s.bytes || null });
     try {
-      const niftiFile = await fetchDicomSeriesFile(jobId, s.id);
+      const niftiFile = await fetchDicomSeriesFile(jobId, s.id, (loaded, total) =>
+        setDicomProgress({ stage: "download", loaded, total: total || s.bytes || null }));
+      setDicomProgress({ stage: "open", since: Date.now() });
       const ok = await viewerRef.current?.replaceBaseVolume(niftiFile);
       if (ok) {
+        viewerRef.current?.fxDevelop?.();
+        setBaseTransform(undefined);
         setBaseLabel(`DICOM · ${s.description || s.id}`);
         setBaseFullPath(null); // server-converted NIfTI, no local source path
         setBaseDicom(dicomSourceRef.current ? { ...dicomSourceRef.current, seriesId: s.id, description: s.description || null } : null);
@@ -145,6 +172,7 @@ export function useBaseVolume({
   const handleResetBase = async () => {
     const ok = await viewerRef.current?.resetToBase(BASE_VOLUME);
     if (ok) {
+      setBaseTransform(undefined);
       setBaseDicom(null);
       setBaseLabel(BASE_VOLUME.name);
       setBaseFullPath(null);
@@ -197,5 +225,7 @@ export function useBaseVolume({
     handleBaseCalRange,
     handleBaseColorbarToggle,
     refreshBaseOverlayMeta,
+    baseTransform,
+    handleBaseTransform,
   };
 }

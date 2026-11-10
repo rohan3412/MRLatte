@@ -1,0 +1,128 @@
+# Builds and smoke-tests the macOS disk images, one per architecture.
+#
+# There is no Mac in the team's build setup, so this is where the macOS build
+# is made and checked: tools/build/assemble-bundle.sh (the bundle),
+# yarn dist:mac:<arch> (the .dmg, ad-hoc signed by tools/build/mac-adhoc-sign.js)
+# tools/build/mac-smoke-test.sh (backend, packaging, launch and quit) and
+# tools/build/ui-smoke.mjs (the window itself: 2D and 3D drawn, a file opened
+# like a double-click, a drawing saved, a report made; screenshots attached).
+# What it can't judge is how it looks on a real Mac's GPU; README "Building
+# for macOS" lists what a person with a Mac should try.
+#
+# The .dmg files are attached to each run as artifacts (kept 14 days).
+name: macOS build
+
+on:
+  # Mac runner minutes count about 10x against the account's free Actions
+  # minutes (the runs stopped on 6 Nov when they ran out), so the Mac build
+  # runs only when something that can break it changes, or by hand
+  # (Actions > macOS build > Run workflow, or gh workflow run mac-build.yml).
+  push:
+    branches: [macos, main]
+    paths:
+      - "frontend/public/electron.js"
+      - "frontend/public/preload.js"
+      # The on-screen test checks the interface too.
+      - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/yarn.lock"
+      - "backend/requirements*.txt"
+      - "backend/core_packages.py"
+      - "data/modules/manifest.json"
+      - "tools/build/**"
+      - "build-mac.sh"
+      - ".github/workflows/mac-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # requirements-lqtpy.txt brings lqtpy (a pinned release wheel, not in
+      # requirements.txt; a dev machine has its own checkout installed).
+      - name: Install the dev environment
+        run: python -m pip install -r backend/requirements.txt -r backend/requirements-frozen.txt -r backend/requirements-lqtpy.txt httpx
+      - name: pytest
+        working-directory: backend
+        run: python -m pytest tests -q
+
+  build:
+    name: Disk image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          # GitHub's Intel macOS image.
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      # electron-builder must not look for a signing identity (the build is
+      # ad-hoc signed by the afterPack hook instead).
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22: the on-screen test uses its built-in WebSocket.
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Cache pinned downloads
+        uses: actions/cache@v4
+        with:
+          path: tools/build/downloads
+          key: downloads-${{ matrix.arch }}-${{ hashFiles('tools/build/assemble-bundle.sh') }}
+
+      - name: Assemble the bundle
+        run: bash tools/build/assemble-bundle.sh --arch ${{ matrix.arch }}
+
+      - name: Smoke test the bundle
+        run: bash tools/build/mac-smoke-test.sh bundle
+
+      - name: Package the disk image
+        working-directory: frontend
+        run: yarn dist:mac:${{ matrix.arch }}
+
+      - name: Smoke test the app
+        run: bash tools/build/mac-smoke-test.sh app
+
+      - name: On-screen test
+        run: node tools/build/ui-smoke.mjs "$(ls -d ../MRLatte-build/electron/mac*/MRLatte.app | head -1)/Contents/MacOS/MRLatte" ui-shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots-mac-${{ matrix.arch }}
+          path: ui-shots
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # upload-artifact only takes paths inside the workspace; the build output
+      # sits beside the repo (package.json directories.output).
+      - name: Collect the disk image
+        run: mkdir -p dist && cp ../MRLatte-build/electron/*.dmg dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MRLatte-mac-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyNiftiBuffer } from "@/lib/niftiClassify";
+import { niftiFileFor, niftiReadResult } from "@/lib/mif";
 import { BASE_VOLUME } from "@/lib/atlasConfig";
 import { isWorkspaceFileName, parseWorkspaceBytes } from "@/lib/workspace";
 
@@ -66,6 +67,8 @@ export function useQuickOpenFile({
   setFocusMode,
 }) {
   const [initialBaseVolume, setInitialBaseVolume] = useState(null);
+  // The desktop app started without a file: Dashboard shows the home screen.
+  const [launchedPlain, setLaunchedPlain] = useState(false);
   // What phase 1 found, for phase 2 to act on once the viewer is ready.
   // { kind: "none" | "error" | "base" | "timeseries" | "activation" | "lesion" | "multi", ... }
   const resolvedRef = useRef(null);
@@ -94,6 +97,7 @@ export function useQuickOpenFile({
         const pending = await window.mrlatte.getPendingOpenFile();
         if (!pending) {
           resolvedRef.current = { kind: "none" };
+          setLaunchedPlain(true);
           setInitialBaseVolume(BASE_VOLUME);
           return;
         }
@@ -107,7 +111,8 @@ export function useQuickOpenFile({
         if (pending.overlays) {
           const errors = [];
           const readClassified = async (f) => {
-            const res = await window.mrlatte.readOpenFile(f.filePath);
+            // A .mif becomes a NIfTI here, before anything looks at it (lib/mif.js).
+            const res = await window.mrlatte.readOpenFile(f.filePath).then(niftiReadResult);
             if (!res?.ok) {
               errors.push({ title: "Could not open file", message: READ_ERROR_MESSAGE[res?.error] || f.name });
               return null;
@@ -149,7 +154,7 @@ export function useQuickOpenFile({
           return;
         }
 
-        const res = await window.mrlatte.readOpenFile(pending.filePath);
+        const res = await window.mrlatte.readOpenFile(pending.filePath).then(niftiReadResult);
         if (!res?.ok) {
           resolvedRef.current = { kind: "error", title: "Could not open file", message: READ_ERROR_MESSAGE[res?.error] || pending.name };
           setInitialBaseVolume(BASE_VOLUME);
@@ -289,9 +294,10 @@ export function useQuickOpenFile({
   const openDroppedFiles = async (files) => {
     const { handleBaseUpload, addUserFile, removeUserLayer } = cbRef.current;
     let baseTaken = false;
-    for (const file of files) {
+    for (let file of files) {
       let classified;
       try {
+        file = await niftiFileFor(file); // a .mif becomes a NIfTI (lib/mif.js)
         classified = await classifyNiftiBuffer(await file.arrayBuffer(), file.name);
       } catch (err) {
         toast.error("Could not open file", { description: file.name });
@@ -323,5 +329,5 @@ export function useQuickOpenFile({
     }
   };
 
-  return { initialBaseVolume, openDroppedFiles };
+  return { initialBaseVolume, openDroppedFiles, launchedPlain };
 }

@@ -1,4 +1,5 @@
 import { NVMesh } from "@niivue/niivue";
+import { shuffledOrder } from "./streamlineOrder";
 
 // ===== Pseudotubes: the compacted instanced-draw buffer =====
 // WHY THIS EXISTS: niivue's own NVMesh.updateFibers() uploads every
@@ -20,6 +21,7 @@ import { NVMesh } from "@niivue/niivue";
 // At 100% display it would be ~850MB — the point budget (POINT_BUDGET_TUBES/
 // POINT_BUDGET_LINES in tractShaders.js) is not optional.
 
+const LOD_SHUFFLE_SEED = 0x4d524c; // fixed: same bundle, same order, every rebuild
 const RESTART = 0xffffffff; // niivue's primitive-restart sentinel, 2**32 - 1
 
 let patched = false;
@@ -219,48 +221,54 @@ export function patchUpdateFibers() {
         compactU32[d + 3] = posClrU32Src[s + 3];
       };
 
-      let destCursor = 0;
-      let runStartCursor = 0;
-      let lastSrc = -1;
-      runLen = 0;
-      // One extra virtual iteration (i === indicesSrc.length) closes out a
-      // final run with no trailing sentinel — see the defensive pass-1 note.
-      for (let i = 0; i <= indicesSrc.length; i++) {
-        const v = i < indicesSrc.length ? indicesSrc[i] : RESTART;
-        if (v === RESTART) {
-          if (runLen > 0) {
-            // Endpoint duplication: v0, v0, v1, ..., v(n-1), v(n-1) — the
-            // first duplicate was already written below when this run
-            // started; write the LAST duplicate now that we know which
-            // vertex was last.
-            writeVertex(destCursor, lastSrc);
-            destCursor++;
-            // Instance j reads compact vertices j, j+1, j+2, j+3 as
-            // (prev, a, b, next) — see the VAO layout below. For a run of n
-            // real vertices occupying compact indices
-            // runStartCursor .. runStartCursor+n+1, the valid instances are
-            // j in [runStartCursor, runStartCursor+n-2] (n-1 segments); the
-            // run's final three compact vertices stay segValid=0 (their
-            // default Uint8Array value) — those would-be instances read
-            // across into the NEXT run's vertices, and the vertex shader
-            // kills them (TRACT_VERT_INSTANCED: `if (segValid < 0.5)
-            // gl_Position = vec4(2,2,2,1)`).
-            const validEnd = runStartCursor + runLen - 2; // < runStartCursor when runLen===1 (0 segments)
-            for (let g = runStartCursor; g <= validEnd; g++) segValid[g] = 1;
-            runLen = 0;
+      // Streamlines are written in a seeded shuffled order, not file order, so
+      // that any prefix of the instances is a fair, nested sample of whole
+      // streamlines. While the view is being turned the renderer draws only a
+      // prefix (lodFraction) and still looks like the full bundle.
+      // Collect each run's [start, end) span in indicesSrc first.
+      const runStarts = [];
+      const runEnds = [];
+      {
+        let s0 = -1;
+        for (let i = 0; i <= indicesSrc.length; i++) {
+          const isEnd = i === indicesSrc.length || indicesSrc[i] === RESTART;
+          if (isEnd) {
+            if (s0 >= 0) { runStarts.push(s0); runEnds.push(i); s0 = -1; }
+          } else if (s0 < 0) {
+            s0 = i;
           }
-          runStartCursor = destCursor;
-        } else {
-          if (runLen === 0) {
-            // First real vertex of a new run: duplicate immediately.
-            writeVertex(destCursor, v); destCursor++;
-            writeVertex(destCursor, v); destCursor++;
-          } else {
-            writeVertex(destCursor, v); destCursor++;
-          }
-          lastSrc = v;
-          runLen++;
         }
+      }
+      const order = shuffledOrder(runStarts.length, LOD_SHUFFLE_SEED);
+
+      let destCursor = 0;
+      for (let k = 0; k < order.length; k++) {
+        const r = order[k];
+        const runStartCursor = destCursor;
+        let lastSrc = -1;
+        // First real vertex is duplicated, then the rest, then the last is
+        // duplicated: v0, v0, v1, ..., v(n-1), v(n-1).
+        for (let i = runStarts[r]; i < runEnds[r]; i++) {
+          const v = indicesSrc[i];
+          if (i === runStarts[r]) { writeVertex(destCursor, v); destCursor++; }
+          writeVertex(destCursor, v); destCursor++;
+          lastSrc = v;
+        }
+        writeVertex(destCursor, lastSrc);
+        destCursor++;
+        // Instance j reads compact vertices j, j+1, j+2, j+3 as
+        // (prev, a, b, next) — see the VAO layout below. For a run of n
+        // real vertices occupying compact indices
+        // runStartCursor .. runStartCursor+n+1, the valid instances are
+        // j in [runStartCursor, runStartCursor+n-2] (n-1 segments); the
+        // run's final three compact vertices stay segValid=0 (their
+        // default Uint8Array value) — those would-be instances read
+        // across into the NEXT run's vertices, and the vertex shader
+        // kills them (TRACT_VERT_INSTANCED: `if (segValid < 0.5)
+        // gl_Position = vec4(2,2,2,1)`).
+        const runLen = runEnds[r] - runStarts[r];
+        const validEnd = runStartCursor + runLen - 2; // < runStartCursor when runLen===1 (0 segments)
+        for (let g = runStartCursor; g <= validEnd; g++) segValid[g] = 1;
       }
 
       // Self-check: for a run

@@ -5,6 +5,7 @@ import {
 } from "@/lib/gl/tractShaders";
 import { createTractPrograms, getTractProgram, disposeTractPrograms } from "@/lib/gl/tractPrograms";
 import { patchUpdateFibers, ensureTractBuffers } from "@/lib/gl/tractBuffers";
+import { lodInstanceCount } from "@/lib/gl/streamlineOrder";
 
 // ===== mrview-parity tractography renderer =====
 // Supersedes the depth-aware "ghost" fiber-occlusion workaround. Where that
@@ -148,7 +149,7 @@ function computeFrameUniforms(nv, state, cache, m, modelMtx) {
     halfFovMM,
     viewportPx,
     thicknessMM: state.thicknessMM ?? BASE_THICKNESS_MM,
-    minThicknessPx: MIN_THICKNESS_PX,
+    minThicknessPx: MIN_THICKNESS_PX * (nv.uiData?.dpr || window.devicePixelRatio || 1),
     viewZmm,
     slabCenter,
     pivotMM,
@@ -221,7 +222,7 @@ function setMeshUniforms(gl, uniforms, msh, forceClipOff) {
 // happen — patchUpdateFibers runs synchronously) and "compacted to nothing
 // instanceable" (e.g. every surviving streamline is a single point) — either
 // way, fall through silently rather than issuing a zero/negative-count draw.
-function bindTractGeometry(gl, msh, geometry) {
+function bindTractGeometry(gl, msh, geometry, lodFraction = 1) {
   if (geometry === "lines") {
     gl.bindVertexArray(msh.vaoFiber);
     return { mode: "lines" };
@@ -229,7 +230,9 @@ function bindTractGeometry(gl, msh, geometry) {
   const t = ensureTractBuffers(gl, msh);
   if (!t || t.nSegments < 1) return false;
   gl.bindVertexArray(t.vao);
-  return { mode: "instanced", count: t.nSegments };
+  // Streamlines are stored shuffled (tractBuffers.js), so a prefix is a fair
+  // sample: drawing fewer instances while the view moves thins the bundle evenly.
+  return { mode: "instanced", count: lodInstanceCount(t.nSegments, lodFraction) };
 }
 
 // Issues one blend/depth pass over the currently-bound geometry. Sets the
@@ -488,7 +491,7 @@ function drawMesh3DWrapped(nv, state, cache, orig, isDepthTest, alpha, m, modelM
     // solid tract rather than yet another additive wash.
     const opaque = rawOpacity >= 1.0;
     setMeshUniforms(gl, prog.uniforms, msh, forceClipOff);
-    const bound = bindTractGeometry(gl, msh, geometry);
+    const bound = bindTractGeometry(gl, msh, geometry, state.lodFraction ?? 1);
     if (!bound) continue;
 
     // ---- The depthMask story (the fix for the dead opacity slider) --------

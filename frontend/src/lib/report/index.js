@@ -181,7 +181,7 @@ export function buildSummaryReport(data) {
     if (data.extraImages?.length) sections.push({ ...buildImagesSection(null, data.extraImages), group: "Visual pathway" });
   }
   if (data.lesionModel) {
-    sections.push(...buildLqtpyFragmentSections(data.reportFragments).map((s) => ({ ...s, group: "Detailed measures" })));
+    sections.push(...buildLqtpyFragmentSections(data.reportFragments, { disconnection: !!data.tractModel }).map((s) => ({ ...s, group: "Detailed measures" })));
   }
   const ran = [data.lesionModel && "atlas overlap", data.tractModel && "tract disconnection",
     data.lnmResult && "network mapping", data.retino && "visual pathway"].filter(Boolean);

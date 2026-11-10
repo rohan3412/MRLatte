@@ -109,7 +109,7 @@ export function RetinotopySection({
                 className="w-full border border-dashed border-border px-2 py-1.5 text-left font-mono text-[10.5px] text-subtle leading-relaxed hover:text-foreground transition-colors"
                 data-testid="retinotopy-wang-missing"
               >
-                {l.name} isn't installed. Install it in the Atlas Manager.
+                {l.name} isn't installed. Install it in the Atlas manager.
               </button>
             );
           }
@@ -240,7 +240,7 @@ export function RetinotopySection({
                you toggled an unrelated overlay on (SMALL-FIXES 53). */
             active={selectedLesionIds.size > 0}
             selectedCount={selectedLesionIds.size}
-            label="Cortical Retinotopy (Benson)"
+            label="Cortical retinotopy (Benson)"
             summaryText={polarOverlap.summary}
             thresholdMode={polarThresh.mode}
             thresholdMin={polarThresh.min}

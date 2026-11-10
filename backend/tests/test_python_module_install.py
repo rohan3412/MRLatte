@@ -317,22 +317,42 @@ def test_a_bundled_package_in_use_does_not_block_removal(env, monkeypatch):
 
 
 def test_shipped_python_modules_pin_files_and_never_duplicate_the_bundle():
-    """The real manifest: every one-click python module pins hashed PyPI files,
+    """The real manifest: every one-click python module pins hashed PyPI files
+    (lqtpy: its own GitHub release wheel, the one pinned in requirements-lqtpy.txt),
     and none of them carries a package the bundled Python already has — module
     folders go first on sys.path, so a second numpy would shadow the bundled one."""
     repo = Path(__file__).resolve().parents[2]
     manifest = json.loads((repo / "data" / "modules" / "manifest.json").read_text(encoding="utf-8"))
     norm = lambda n: re.sub(r"[-_.]+", "-", n).lower()
-    bundled = {norm(re.split(r"[<>=!~;@ \[]", line.strip(), maxsplit=1)[0])
-               for line in (repo / "backend" / "requirements-frozen.txt").read_text().splitlines()
-               if line.strip() and not line.lstrip().startswith("#")}
+
+    def listed(name):                           # follows `-r other.txt`
+        out = set()
+        for line in (repo / "backend" / name).read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("-r "):
+                out |= listed(line[3:].strip())
+            else:
+                out.add(norm(re.split(r"[<>=!~;@ \[]", line, maxsplit=1)[0]))
+        return out
+
+    bundled = listed("requirements-frozen.txt")
     for m in manifest["modules"]:
         if m.get("type") != "python-package":
+            continue
+        if m["id"] == "python-numpy":
+            # The one module that IS part of the standard bundle: only the
+            # viewer-only build (requirements-core.txt) lacks it, so it is
+            # checked against that list instead.
+            assert not {"numpy", "nibabel"} & listed("requirements-core.txt")
             continue
         pinned = [s for s in m.get("sources") or [] if s.get("type") in ("wheel", "sdist")]
         assert pinned, f"{m['id']} has nothing to install from"
         for s in pinned:
-            assert s["url"].startswith("https://files.pythonhosted.org/"), s
+            assert (s["url"].startswith("https://files.pythonhosted.org/")
+                    or (m["id"] == "lqtpy" and s["url"].startswith(
+                        "https://github.com/rohan3412/LQTpy/releases/download/"))), s
             assert re.fullmatch(r"[0-9a-f]{64}", s["sha256"]), s
             assert s.get("bytes", 0) > 0, s
             name = s["url"].rsplit("/", 1)[1]
@@ -340,7 +360,13 @@ def test_shipped_python_modules_pin_files_and_never_duplicate_the_bundle():
             assert project not in bundled, f"{m['id']} duplicates bundled {project}"
             if s["type"] == "sdist":
                 assert s.get("extract"), s
-        assert m["bytes"] == sum(s["bytes"] for s in pinned), m["id"]
+        # `bytes` is the Windows download; each platform's own total is
+        # reported by the backend from its tagged files.
+        windows = [s for s in pinned if s.get("platform") in (None, "win_amd64")]
+        assert m["bytes"] == sum(s["bytes"] for s in windows), m["id"]
+        # Compiled wheels are pinned for every platform the app ships on.
+        tags = {s["platform"] for s in pinned if s.get("platform")}
+        assert not tags or tags == {"win_amd64", "macosx_arm64", "macosx_x86_64"}, (m["id"], tags)
 
 
 def test_a_second_install_while_one_runs_is_refused(env, monkeypatch):
@@ -397,3 +423,68 @@ def test_server_startup_adds_installed_module_folders(env):
     with TestClient(app):                          # runs startup
         assert str(folder) in sys.path
         assert __import__(PKG).VALUE == 7
+
+
+# --- Per-platform pins (the macOS build) -------------------------------------
+# pin_python_modules.py tags every platform-specific wheel with the platform it
+# was resolved for; pure-Python files carry no tag and serve every platform.
+
+def _tagged_sources(env):
+    win = _wheel(env.tmp / "win.whl", {f"{PKG}/__init__.py": "VALUE = 'win'\n"})
+    mac = _wheel(env.tmp / "mac.whl", {f"{PKG}/__init__.py": "VALUE = 'mac'\n"})
+    pure = _wheel(env.tmp / "pure.whl", {f"{PKG_B}/__init__.py": "VALUE = 2\n"})
+    env.served["by_url"] = {"https://example.invalid/win.whl": win,
+                            "https://example.invalid/mac.whl": mac,
+                            "https://example.invalid/pure.whl": pure}
+    return [_src("wheel", win, "https://example.invalid/win.whl", platform="win_amd64"),
+            _src("wheel", mac, "https://example.invalid/mac.whl", platform="macosx_arm64"),
+            _src("wheel", pure, "https://example.invalid/pure.whl")]
+
+
+def test_only_this_platforms_wheels_are_installed(env, monkeypatch):
+    env.manifest_with(_tagged_sources(env), packages=(PKG, PKG_B))
+    monkeypatch.setattr(mods, "_platform_tag", lambda: "macosx_arm64")
+    assert _install(TestClient(app))["stage"] == "done"
+    assert __import__(PKG).VALUE == "mac"
+    assert __import__(PKG_B).VALUE == 2
+
+
+def test_the_size_shown_is_this_platforms_download(env, monkeypatch):
+    sources = _tagged_sources(env)
+    env.manifest_with(sources, packages=(PKG, PKG_B))
+    monkeypatch.setattr(mods, "_platform_tag", lambda: "win_amd64")
+    assert _module(TestClient(app))["bytes"] == sources[0]["bytes"] + sources[2]["bytes"]
+
+
+def test_a_module_without_wheels_for_this_platform_is_not_offered(env, monkeypatch):
+    win, _mac, pure = _tagged_sources(env)
+    env.manifest_with([win, pure], packages=(PKG, PKG_B))
+    monkeypatch.setattr(mods, "_platform_tag", lambda: "macosx_x86_64")
+    client = TestClient(app)
+    m = _module(client)
+    assert m["downloadable"] is False
+    assert "macosx_x86_64" in m["notInstallableReason"]
+    assert client.post(f"/api/modules/{MOD}/install").status_code == 409
+
+
+def test_platform_tags(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(mods._platform, "machine", lambda: "arm64")
+    assert mods._platform_tag() == "macosx_arm64"
+    monkeypatch.setattr(mods._platform, "machine", lambda: "x86_64")
+    assert mods._platform_tag() == "macosx_x86_64"
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert mods._platform_tag() == "win_amd64"
+
+
+def test_lqtpy_module_pins_the_same_wheel_as_its_requirements_file():
+    """Two places name the lqtpy wheel (the module, and the full installer's
+    requirements-lqtpy.txt); an upgrade that moves one must move the other."""
+    repo = Path(__file__).resolve().parents[2]
+    manifest = json.loads((repo / "data" / "modules" / "manifest.json").read_text(encoding="utf-8"))
+    mod = next(m for m in manifest["modules"] if m["id"] == "lqtpy")
+    req = (repo / "backend" / "requirements-lqtpy.txt").read_text(encoding="utf-8")
+    url, sha = re.search(r"lqtpy @ (\S+)#sha256=([0-9a-f]{64})", req).groups()
+    assert [(s["url"], s["sha256"]) for s in mod["sources"]] == [(url, sha)]
+    assert mod["version"] in url
+    assert mod["requires"] == ["python-scipy"]

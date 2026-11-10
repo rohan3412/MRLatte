@@ -18,8 +18,9 @@ MANIFEST = REPO / "data" / "modules" / "manifest.json"
 
 def test_every_packed_module_installs_and_verifies(tmp_path, monkeypatch):
     out = tmp_path / "assets"
-    subprocess.run([sys.executable, str(REPO / "tools" / "scripts" / "pack_data_modules.py"),
-                    "--out", str(out)], check=True, capture_output=True)
+    r = subprocess.run([sys.executable, str(REPO / "tools" / "scripts" / "pack_data_modules.py"),
+                        "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-2000:] or r.stdout[-2000:]
     root = tmp_path / "module-root"
     root.mkdir()
     monkeypatch.setattr(deps, "MODULE_ROOT", root)

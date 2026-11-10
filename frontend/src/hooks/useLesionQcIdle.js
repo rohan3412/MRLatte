@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { runLesionQc } from "@/lib/lesionQc";
-
-// No draw changes for this long while paint mode is on -> run QC once in the
-// background. Named per CLAUDE.md §2 rather than an inline magic number.
-export const LESION_QC_IDLE_MS = 30000;
+import { getPref } from "@/lib/preferences";
 
 /**
  * Idle-drawing quality check (owner's idea-inbox request: "give a warning
  * during drawing after a certain time limit of no drawing"). While paint
  * mode is on and the drawing has content, run lqtpy QC in the background
- * after `LESION_QC_IDLE_MS` of no draw changes, and return any flags as
+ * after a pause in drawing (Preferences: on/off and how long, 30 s by default),
+ * and return any flags as
  * `idleWarning` — never a modal (a modal popping up mid-stroke would be
  * infuriating). Dashboard shows it as a persistent orange warning on the
  * viewer (not a toast, which vanished after a few seconds — owner's
@@ -84,7 +82,10 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
     clearTimer();
     setIdleWarning(null);
     if (!activeRef.current) return;
-    timerRef.current = setTimeout(runIdleCheck, LESION_QC_IDLE_MS);
+    // Preferences can switch it off or change the pause; read at each draw
+    // change, so a change there applies to the next pause.
+    if (!getPref("idleQc")) return;
+    timerRef.current = setTimeout(runIdleCheck, getPref("idleQcSeconds") * 1000);
   });
 
   // Stop the pending check, and drop the warning, the moment paint mode

@@ -5,7 +5,7 @@
 // resolveLesionAtlasMetrics below. PDF/text rendering is done in the renderer
 // (data is already in-memory; no backend round-trip for that part).
 
-import { affineDet3, computeAtlasOverlap, getDims } from "@/lib/volumeAnalysis";
+import { affineDet3, computeAtlasOverlap, getDims, voxToMM } from "@/lib/volumeAnalysis";
 import {
   computeVoxelCounts, affectedSet, mergeRanges, classifyHemifield, buildSummary,
 } from "@/lib/retinotopyAnalysis";
@@ -45,15 +45,7 @@ export function computeLesionVolume(lesionVol) {
   const voxMM3 = Math.abs(affineDet3(lesionVol.matRAS));
   const mm3 = count * voxMM3;
   let centroidMM = null;
-  if (count > 0) {
-    const M = lesionVol.matRAS;
-    const ci = cx / count, cj = cy / count, ck = cz / count;
-    centroidMM = [
-      M[0] * ci + M[4] * cj + M[8] * ck + M[12],
-      M[1] * ci + M[5] * cj + M[9] * ck + M[13],
-      M[2] * ci + M[6] * cj + M[10] * ck + M[14],
-    ];
-  }
+  if (count > 0) centroidMM = voxToMM(lesionVol, [cx / count, cy / count, cz / count]);
   return { voxelCount: count, mm3, cm3: mm3 / 1000, centroidMM };
 }
 

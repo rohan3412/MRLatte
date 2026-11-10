@@ -1,9 +1,15 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from "react";
-import { Eye, EyeOff, Trash2, ChevronDown, ChevronRight, Pencil, Download, Scissors, Copy, FileText, Lock, LockOpen, StickyNote } from "lucide-react";
+import { Eye, EyeOff, Trash2, ChevronDown, ChevronUp, ChevronRight, Pencil, Download, Scissors, Copy, FileText, Lock, LockOpen, StickyNote } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { takeFresh } from "@/lib/viewer/effects";
+import { InspectorContext } from "@/lib/inspector";
+import { createPortal } from "react-dom";
+import { niceStep } from "@/lib/sliderMath";
+import { windowFromLevelWidth } from "@/lib/windowDrag";
 import { EditableNumber } from "@/components/ui/editable-number";
 import { ContextMenu, useContextMenu } from "@/components/ui/context-menu";
 import { RangeSlider } from "@/components/ui/range-slider";
+import { CrosshairMarker } from "@/components/CrosshairMarker";
 import { Switch } from "@/components/ui/switch";
 import { ColormapPicker } from "@/components/ui/colormap-picker";
 import { colormapGradient, colormapRampGradient, colormapSample } from "@/lib/colormaps";
@@ -24,7 +30,8 @@ const COLORMAPS = [
 /**
  * Editable threshold value — click to edit as a textbox.
  */
-const ThresholdValue = ({ value, onCommit, testId, align = "left" }) => {
+// `step`: what the hover up/down arrows add or take (Shift: ten times that).
+const ThresholdValue = ({ value, onCommit, testId, align = "left", step }) => {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
   const inputRef = useRef(null);
@@ -65,15 +72,29 @@ const ThresholdValue = ({ value, onCommit, testId, align = "left" }) => {
       />
     );
   }
+  const bump = (e, dir) => {
+    e.stopPropagation();
+    if (value == null || !step) return;
+    const decimals = (String(step).split(".")[1] || "").length;
+    onCommit(Number((Number(value) + dir * step * (e.shiftKey ? 10 : 1)).toFixed(decimals)));
+  };
   return (
-    <button
-      onClick={() => setEditing(true)}
-      className={`${box} border-edge text-foreground text-center hover:border-muted-foreground transition-colors`}
-      title="Click to type a value"
-      data-testid={testId}
-    >
-      {value != null ? Number(value).toFixed(2) : "—"}
-    </button>
+    <span className="num-edit inline-flex">
+      <button
+        onClick={() => setEditing(true)}
+        className={`${box} border-edge text-foreground text-center hover:border-muted-foreground transition-colors`}
+        title="Click to type a value"
+        data-testid={testId}
+      >
+        {value != null ? Number(value).toFixed(2) : "—"}
+      </button>
+      {step > 0 && (
+        <span className="num-steps">
+          <button type="button" tabIndex={-1} aria-label="Up" onClick={(e) => bump(e, 1)}><ChevronUp size={9} strokeWidth={2.5} /></button>
+          <button type="button" tabIndex={-1} aria-label="Down" onClick={(e) => bump(e, -1)}><ChevronDown size={9} strokeWidth={2.5} /></button>
+        </span>
+      )}
+    </span>
   );
 };
 
@@ -111,7 +132,7 @@ const SwitchRow = ({ label, checked, onChange, testId }) => (
  */
 const LevelsSlider = ({
   histogram, colormap, invert, globalMin, globalMax, lo, hi, colourLo, colourHi,
-  invertThreshold, rampGrad, sliderValue, sliderMax, onSliderChange, label, testId,
+  invertThreshold, rampGrad, sliderValue, sliderMax, onSliderChange, label, testId, layerKey,
 }) => {
   const range = globalMax - globalMin;
   const loFrac = (lo - globalMin) / range;
@@ -191,6 +212,7 @@ const LevelsSlider = ({
           </>
         )}
       </div>
+      <CrosshairMarker layerKey={layerKey} min={globalMin} max={globalMax} inset={4} />
       <RangeSlider
         value={sliderValue}
         min={0}
@@ -207,7 +229,12 @@ const LevelsSlider = ({
   );
 };
 
-export const LayerControlAdvanced = ({
+// The card itself. `inspectorRow`: always the one-line row (the inspector
+// shows the full card), its name selecting instead of unfolding.
+const LayerCard = ({
+  inspectorRow = false,
+  inspectorSelected = false,
+  onInspect,
   layer,
   visible,
   opacity,
@@ -284,7 +311,11 @@ export const LayerControlAdvanced = ({
   // The visibility window's heading: "Threshold" / "Visibility" by default,
   // the base volume calls it "Window".
   thresholdLabel,
+  windowSliders = false, // base volume: also show Level / Width (what the right-drag moves)
 }) => {
+  // Just added (or put back by Undo): the card glows once as it appears (lib/viewer/effects.js).
+  const [glow, setGlow] = useState(() => takeFresh(layer.id));
+  const endGlow = (e) => { if (e.animationName === "glow-once") setGlow(false); };
   // Controls whether the advanced section (threshold, colormap, atlas) is shown.
   // Collapses by default to keep the sidebar compact when many layers are loaded.
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -322,6 +353,9 @@ export const LayerControlAdvanced = ({
 
   // Normalise cal_min/max within [globalMin, globalMax]
   const lo = hasThresholds ? Math.max(globalMin, Math.min(globalMax, calMin ?? globalMin)) : 0;
+  // The hover arrows' step for this layer's values: about a hundredth of its range.
+  const valueStep = Number.isFinite(globalMin) && Number.isFinite(globalMax) && globalMax > globalMin
+    ? niceStep(globalMin, globalMax) : 0;
   const hi = hasThresholds ? Math.max(globalMin, Math.min(globalMax, calMax ?? globalMax)) : 1;
   const sortedLo = Math.min(lo, hi);
   const sortedHi = Math.max(lo, hi);
@@ -349,6 +383,16 @@ export const LayerControlAdvanced = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [globalMin, globalMax, onCalRangeChange, layer.id]
   );
+
+  // Level (centre) and Width of the same window, for the base card.
+  const WIN_STEPS = 1000;
+  const winLevel = (sortedLo + sortedHi) / 2;
+  const winWidth = sortedHi - sortedLo;
+  const winMinWidth = range / 1000;
+  const setLevelWidth = (level, width) => {
+    const w = windowFromLevelWidth({ level, width, gmin: globalMin, gmax: globalMax });
+    onCalRangeChange?.(layer.id, w.lo, w.hi);
+  };
 
   const handleLoText = (v) => onCalRangeChange?.(layer.id, Math.min(v, sortedHi), Math.max(v, sortedHi));
   const handleHiText = (v) => onCalRangeChange?.(layer.id, Math.min(sortedLo, v), Math.max(sortedLo, v));
@@ -404,10 +448,12 @@ export const LayerControlAdvanced = ({
       hasColorRange && onAutoColorRange && { label: "Auto colour range", disabled: colorLocked, onSelect: () => onAutoColorRange(layer.id) },
       "-",
       showHeader && { label: "View NIfTI header", onSelect: () => showHeader(layer) },
-      onEdit && { label: "Edit in Draw Mask", onSelect: () => onEdit(layer.id) },
+      onEdit && { label: "Edit in Draw mask", onSelect: () => onEdit(layer.id) },
       onDuplicate && { label: "Duplicate", onSelect: () => onDuplicate(layer.id) },
       onDownload && { label: "Download (.nii.gz)", onSelect: () => onDownload(layer.id) },
-      { label: expanded ? "Collapse controls" : "Expand controls", onSelect: () => setExpanded((v) => !v) },
+      inspectorRow
+        ? onInspect && { label: inspectorSelected ? "Hide settings" : "Show settings", onSelect: () => onInspect() }
+        : { label: expanded ? "Collapse controls" : "Expand controls", onSelect: () => setExpanded((v) => !v) },
       "-",
       removable && { label: "Remove layer", danger: true, onSelect: () => onRemove?.(layer.id) },
     ].filter(Boolean).filter((it, i, all) => it !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
@@ -417,10 +463,11 @@ export const LayerControlAdvanced = ({
   // Sidebar declutter: a hidden layer whose controls are folded is one line:
   // show, swatch, name. The name opens the full card (description, row
   // actions, notes, Clip, and a lesion's analysis tools).
-  if (!visible && !expanded) {
+  if ((!visible && !expanded) || inspectorRow) {
     return (
       <div
-        className="group relative flex items-center gap-1.5 rounded-lg border border-border bg-card py-1 pl-1 pr-2"
+        className={`group relative flex items-center gap-1.5 rounded-lg border bg-card py-1 pl-1 pr-2 ${inspectorSelected ? "border-edge bg-panel-active" : "border-border"} ${glow ? "glow-once" : ""}`}
+        onAnimationEnd={endGlow}
         data-testid={`layer-${layer.id}`}
         data-compact="true"
         onContextMenu={openCardMenu}
@@ -429,13 +476,13 @@ export const LayerControlAdvanced = ({
         <button
           type="button"
           onClick={() => onToggle?.(layer.id)}
-          aria-pressed={false}
-          title="Show layer"
-          aria-label="Show layer"
+          aria-pressed={!!visible}
+          title={visible ? "Hide layer" : "Show layer"}
+          aria-label={visible ? "Hide layer" : "Show layer"}
           className="icon-btn h-6 w-6 flex-shrink-0"
           data-testid={`toggle-${layer.id}`}
         >
-          <EyeOff size={14} />
+          {visible ? <Eye size={14} /> : <EyeOff size={14} />}
         </button>
         <span
           className="keep-colours h-3 w-3 flex-shrink-0 rounded-[3px]"
@@ -445,10 +492,10 @@ export const LayerControlAdvanced = ({
         />
         <button
           type="button"
-          onClick={() => setExpanded(true)}
-          aria-expanded={false}
+          onClick={() => (inspectorRow ? onInspect?.() : setExpanded(true))}
+          aria-expanded={inspectorRow ? inspectorSelected : false}
           title={layer.fullPath || layer.name}
-          className="flex min-h-[24px] min-w-0 flex-1 items-center gap-2 text-left text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+          className={`flex min-h-[24px] min-w-0 flex-1 items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground ${visible ? "text-foreground" : "text-muted-foreground"}`}
           data-testid={`expand-${layer.id}`}
         >
           <span className="min-w-0 flex-1 truncate">{layer.name}</span>
@@ -463,7 +510,8 @@ export const LayerControlAdvanced = ({
     <div
       className={`group relative rounded-lg border bg-card p-2.5 space-y-2 transition-colors ${
         expanded ? "border-edge" : "border-border"
-      }`}
+      } ${glow ? "glow-once" : ""}`}
+      onAnimationEnd={endGlow}
       data-testid={`layer-${layer.id}`}
       onContextMenu={openCardMenu}
     >
@@ -501,7 +549,7 @@ export const LayerControlAdvanced = ({
             </RowAction>
           )}
           {onEdit && (
-            <RowAction onClick={() => onEdit(layer.id)} title="Edit in Draw Mask (erase / continue drawing)" testId={`edit-${layer.id}`}>
+            <RowAction onClick={() => onEdit(layer.id)} title="Edit in Draw mask (erase / continue drawing)" testId={`edit-${layer.id}`}>
               <Pencil size={13} />
             </RowAction>
           )}
@@ -573,6 +621,7 @@ export const LayerControlAdvanced = ({
               value={[opacity * 100]}
               max={100}
               step={1}
+              snaps={[50, 100]}
               onValueChange={(v) => onOpacityChange(layer.id, v[0] / 100)}
               className="flex-1 cursor-pointer"
               aria-label="Opacity"
@@ -618,9 +667,9 @@ export const LayerControlAdvanced = ({
                   </span>
                 ) : (
                   <>
-                    <ThresholdValue value={cSortedLo} onCommit={handleColorLoText} testId={`color-lo-${layer.id}`} align="left" />
+                    <ThresholdValue value={cSortedLo} onCommit={handleColorLoText} testId={`color-lo-${layer.id}`} align="left" step={valueStep} />
                     <span className="text-[11px] text-subtle">–</span>
-                    <ThresholdValue value={cSortedHi} onCommit={handleColorHiText} testId={`color-hi-${layer.id}`} align="right" />
+                    <ThresholdValue value={cSortedHi} onCommit={handleColorHiText} testId={`color-hi-${layer.id}`} align="right" step={valueStep} />
                   </>
                 )}
                 {onAutoColorRange && (
@@ -654,6 +703,7 @@ export const LayerControlAdvanced = ({
                 className={`keep-colours relative h-2.5 rounded shadow-[inset_0_0_0_1px_rgb(0_0_0/0.25)] ${colorLocked ? "opacity-55" : ""}`}
                 style={{ background: rampGrad }}
               >
+                <CrosshairMarker layerKey={layer.id} min={globalMin} max={globalMax} />
                 <RangeSlider
                   value={[toSlider(cSortedLo), toSlider(cSortedHi)]}
                   min={0}
@@ -688,9 +738,9 @@ export const LayerControlAdvanced = ({
                     Auto
                   </button>
                 )}
-                <ThresholdValue value={sortedLo} onCommit={handleLoText} testId={`threshold-lo-${layer.id}`} align="left" />
+                <ThresholdValue value={sortedLo} onCommit={handleLoText} testId={`threshold-lo-${layer.id}`} align="left" step={valueStep} />
                 <span className="text-[11px] text-subtle">–</span>
-                <ThresholdValue value={sortedHi} onCommit={handleHiText} testId={`threshold-hi-${layer.id}`} align="right" />
+                <ThresholdValue value={sortedHi} onCommit={handleHiText} testId={`threshold-hi-${layer.id}`} align="right" step={valueStep} />
                 </div>
               </div>
               <LevelsSlider
@@ -709,6 +759,7 @@ export const LayerControlAdvanced = ({
                 sliderMax={SLIDER_STEPS}
                 onSliderChange={handleSliderChange}
                 label={visibilityLabel}
+                layerKey={layer.id}
                 testId={`threshold-${layer.id}`}
               />
               {/* Data min | what's visible now | data max. In a narrow panel the
@@ -720,6 +771,33 @@ export const LayerControlAdvanced = ({
                 </span>
                 <span>{Number(globalMax).toFixed(2)}</span>
               </div>
+            </div>
+          )}
+
+          {/* Level / Width: the same window as the range above, as the
+              right-drag moves it (up/down = Level, left/right = Width). */}
+          {hasThresholds && onCalRangeChange && windowSliders && (
+            <div className="space-y-1.5" data-testid={`window-sliders-${layer.id}`}>
+              {[
+                { key: "level", label: "Level", value: winLevel, min: globalMin, max: globalMax,
+                  onChange: (v) => setLevelWidth(v, winWidth) },
+                { key: "width", label: "Width", value: winWidth, min: winMinWidth, max: range,
+                  onChange: (v) => setLevelWidth(winLevel, v) },
+              ].map((r) => (
+                <div key={r.key} className="flex items-center gap-2">
+                  <span className="cap w-[42px] flex-shrink-0 text-subtle">{r.label}</span>
+                  <Slider
+                    value={[((r.value - r.min) / (r.max - r.min || 1)) * WIN_STEPS]}
+                    max={WIN_STEPS}
+                    step={1}
+                    onValueChange={(v) => r.onChange(r.min + (v[0] / WIN_STEPS) * (r.max - r.min))}
+                    className="flex-1 cursor-pointer"
+                    aria-label={r.label}
+                    data-testid={`window-${r.key}-${layer.id}`}
+                  />
+                  <ThresholdValue value={r.value} onCommit={r.onChange} testId={`window-${r.key}-value-${layer.id}`} align="right" step={valueStep} />
+                </div>
+              ))}
             </div>
           )}
 
@@ -811,6 +889,22 @@ export const LayerControlAdvanced = ({
         </div>
       )}
     </div>
+  );
+};
+
+// With the inspector on, the sidebar keeps the row and the selected layer's
+// full card opens in the panel on the right (a portal, so every caller stays
+// as it is). Without it, the inline card as always.
+export const LayerControlAdvanced = (props) => {
+  const insp = useContext(InspectorContext);
+  if (!insp?.enabled) return <LayerCard {...props} />;
+  const selected = insp.selectedId === props.layer.id;
+  return (
+    <>
+      <LayerCard {...props} inspectorRow inspectorSelected={selected}
+        onInspect={() => insp.select(selected ? null : props.layer.id)} />
+      {selected && insp.target && createPortal(<LayerCard {...props} defaultExpanded />, insp.target)}
+    </>
   );
 };
 

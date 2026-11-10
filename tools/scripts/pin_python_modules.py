@@ -12,11 +12,21 @@ $MRLATTE_BUILD_DIR or ../MRLatte-build, then MRLatte/python/site-packages).
 
 For each module with a `pip` source naming a backend/requirements-*.txt file:
 
-  * Resolve its requirements to cp311 / win_amd64 wheels with pip's own
+  * Resolve its requirements to cp311 wheels for each platform the app ships
+    on (PLATFORMS: Windows x64, macOS Apple Silicon and Intel) with pip's own
     resolver (dry run — nothing is installed), constrained to the exact
     versions the bundle already has. Packages the bundle has are left out:
     module folders go first on sys.path, so a second numpy would shadow the
     bundled one.
+  * Every platform gets the same versions: the versions already pinned (so a
+    re-run leaves existing pins as they are) and the joint picks below are
+    constraints for all of them. A compiled wheel is tagged with its platform
+    (`"platform": "macosx_arm64"`); a pure-Python one is not, and serves all.
+    A platform that can't be satisfied (no wheel for a pinned version) is
+    reported and left out, so the app says the module isn't available there.
+    pip evaluates environment markers for the machine running this script,
+    so a dependency that only one OS needs may be pinned for all of them;
+    that is harmless for pure-Python ones.
   * All modules are resolved together first, then each against those picks,
     so a package two modules share (python-dateutil, six) is the same version
     in both folders and neither can serve the other the wrong one.
@@ -43,8 +53,22 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 MANIFEST = REPO / "data" / "modules" / "manifest.json"
-TARGET = ["--only-binary=:all:", "--platform", "win_amd64", "--python-version", "3.11",
-          "--implementation", "cp", "--abi", "cp311"]
+# Manifest tag -> pip --platform. macOS wheels are taken for macOS 12 and
+# newer (pip also accepts older ones), the floor assemble-bundle.sh installs
+# the bundle's own packages for and package.json's mac.minimumSystemVersion.
+# Linux: manylinux2014 (glibc 2.17, and the older manylinux tags), as the
+# bundle; the tag is what routers/modules.py _platform_tag() reports there.
+PLATFORMS = {
+    "win_amd64": "win_amd64",
+    "macosx_arm64": "macosx_12_0_arm64",
+    "macosx_x86_64": "macosx_12_0_x86_64",
+    "linux_x86_64": "manylinux2014_x86_64",
+}
+
+
+def target(platform):
+    return ["--only-binary=:all:", "--platform", PLATFORMS[platform], "--python-version", "3.11",
+            "--implementation", "cp", "--abi", "cp311"]
 COMPILED = (".c", ".cc", ".cpp", ".pyx", ".pxd", ".f", ".f90")
 BUNDLED = []        # "name==version" of every package in the bundle; set in main()
 
@@ -68,7 +92,7 @@ def pypi(name, version=None):
         return json.load(r)
 
 
-def resolve(requirements, constraints):
+def resolve(requirements, constraints, platform="win_amd64"):
     """pip's resolver, dry run. Returns its install report, or raises with the
     name pip could find no wheel for."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -76,7 +100,7 @@ def resolve(requirements, constraints):
         cons.write_text("\n".join(constraints) + "\n", encoding="utf-8")
         report = Path(tmp) / "report.json"
         r = subprocess.run([sys.executable, "-m", "pip", "install", "--dry-run", "--quiet",
-                            "--ignore-installed", "--report", str(report), *TARGET,
+                            "--ignore-installed", "--report", str(report), *target(platform),
                             "--target", str(Path(tmp) / "t"), "-c", str(cons), *requirements],
                            capture_output=True, text=True)
         if r.returncode:
@@ -125,13 +149,32 @@ def expand(requirements):
             reqs = [r for r in reqs if req_name(r) != name] + deps
 
 
-def wheel_source(item):
+def wheel_source(item, platform):
+    """A pinned wheel; tagged with `platform` unless it is pure Python."""
     url = item["download_info"]["url"]
     info = item["download_info"].get("archive_info") or {}
     sha = (info.get("hashes") or {}).get("sha256") or info.get("hash", "").split("=", 1)[-1]
     with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=60) as r:
         size = int(r.headers["Content-Length"])
-    return {"type": "wheel", "url": url, "sha256": sha, "bytes": size}
+    src = {"type": "wheel", "url": url, "sha256": sha, "bytes": size}
+    if not url.rsplit("/", 1)[-1].endswith("-any.whl"):
+        src["platform"] = platform
+    return src
+
+
+def pinned_versions(module):
+    """name==version of every file a module already pins (wheel or sdist)."""
+    out = []
+    for s in module.get("sources") or []:
+        name = s.get("url", "").rsplit("/", 1)[-1]
+        if s.get("type") == "wheel" and name.endswith(".whl"):
+            dist, version = name.split("-")[:2]
+        elif s.get("type") == "sdist" and name.endswith((".tar.gz", ".zip")):
+            dist, version = re.sub(r"\.(tar\.gz|zip)$", "", name).rsplit("-", 1)
+        else:
+            continue
+        out.append(f"{norm(dist)}=={version}")
+    return out
 
 
 def main():
@@ -152,23 +195,44 @@ def main():
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     modules = []
+    already = []
     for m in manifest["modules"]:
         pip_src = next((s for s in m.get("sources") or [] if s.get("type") == "pip"), None)
         if m.get("type") == "python-package" and pip_src:
+            already += pinned_versions(m)
             reqs, sdists = expand(read_requirements(REPO / "backend" / pip_src["requirements"]))
             modules.append((m, reqs, sdists))
+    # Versions already pinned stay pinned (a package two modules share is one
+    # version, so duplicates collapse).
+    already = sorted(set(already))
 
-    joint = resolve([r for _, reqs, _ in modules for r in reqs], BUNDLED)
+    joint = resolve([r for _, reqs, _ in modules for r in reqs], BUNDLED + already)
     picks = [f"{i['metadata']['name']}=={i['metadata']['version']}" for i in joint]
 
     for m, reqs, sdists in modules:
-        wheels = [wheel_source(i) for i in resolve(reqs, BUNDLED + picks)
-                  if norm(i["metadata"]["name"]) not in bundled]
+        wheels, seen, missing = [], set(), []
+        for platform in PLATFORMS:
+            try:
+                items = resolve(reqs, BUNDLED + picks, platform)
+            except LookupError as e:
+                missing.append(f"{platform} (no wheel for {e})")
+                continue
+            for i in items:
+                if norm(i["metadata"]["name"]) in bundled:
+                    continue
+                src = wheel_source(i, platform)
+                key = (src["url"], src.get("platform"))
+                if key not in seen:
+                    seen.add(key)
+                    wheels.append(src)
         pinned = wheels + sdists
         m["sources"] = pinned + [s for s in m["sources"] if s.get("type") not in ("wheel", "sdist")]
-        m["bytes"] = sum(s["bytes"] for s in pinned)
+        # The Windows download, as before; the backend reports each
+        # platform's own total (routers/modules.py module_snapshot).
+        m["bytes"] = sum(s["bytes"] for s in pinned if s.get("platform") in (None, "win_amd64"))
         print(f"{m['id']}: {len(wheels)} wheels + {len(sdists)} source packages, "
-              f"{m['bytes'] / 1e6:.1f} MB to download")
+              f"{m['bytes'] / 1e6:.1f} MB to download on Windows"
+              + (f"; NOT available on {', '.join(missing)}" if missing else ""))
 
     MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8", newline="\n")

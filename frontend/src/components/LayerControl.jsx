@@ -101,6 +101,7 @@ export const LayerControl = ({
               value={[opacity * 100]}
               max={100}
               step={1}
+              snaps={[50, 100]}
               onValueChange={(v) => onOpacityChange(layer.id, v[0] / 100)}
               className="cursor-pointer"
               aria-label="Opacity"

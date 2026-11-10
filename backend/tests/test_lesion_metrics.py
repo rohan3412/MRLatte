@@ -156,6 +156,7 @@ def test_unknown_lesion_id_is_404():
 def test_lqtpy_unavailable_is_503(monkeypatch, synthetic_atlas):
     lesion_id = _upload(_cube_lesion())
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     r = client.post("/api/lesion/metrics", json={
         "lesion_id": lesion_id, "atlas_ids": [],
     })
@@ -164,6 +165,7 @@ def test_lqtpy_unavailable_is_503(monkeypatch, synthetic_atlas):
 
 def test_capabilities_reports_unavailable_when_lqtpy_absent(monkeypatch):
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     r = client.get("/api/lesion/capabilities")
     assert r.status_code == 200
     body = r.json()
@@ -410,6 +412,7 @@ def test_report_fragments_valid_sections_allowlist(synthetic_atlas):
 def test_report_fragments_lqtpy_unavailable_is_503(monkeypatch, synthetic_atlas):
     lesion_id = _upload(_cube_lesion())
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     r = client.post("/api/lesion/report-fragments", json={
         "lesion_id": lesion_id, "atlas_ids": [], "sections": ["morphometry"],
     })
@@ -804,6 +807,7 @@ def test_qc_unavailable_is_503(monkeypatch, synthetic_atlas):
 def test_qc_unavailable_when_lqtpy_entirely_absent_is_503(monkeypatch, synthetic_atlas):
     lesion_id = _upload(_solid_sphere_lesion())
     monkeypatch.setattr(lesion_metrics, "lqtpy", None)
+    monkeypatch.setattr(lesion_metrics, "_ensure_lqtpy", lambda: None)
     r = client.post("/api/lesion/qc", json={"lesion_id": lesion_id, "mni": False})
     assert r.status_code == 503, r.text
 

@@ -292,3 +292,47 @@ def test_remove_still_refuses_anything_outside_the_module_root(tmp_path, root):
     assert "refusing to remove solo" in r.stderr
     assert "outside the module root" in r.stderr
     assert victim.read_bytes() == PAYLOAD, "remove deleted a file outside the root"
+
+
+# === requires =================================================================
+
+def _requires_manifest(tmp_path, requires_b):
+    mods = [
+        {"id": "a", "name": "A", "type": "python-package", "pythonPackages": ["mrl_cli_a"]},
+        {"id": "b", "name": "B", "type": "python-package", "pythonPackages": ["mrl_cli_b"],
+         "requires": requires_b},
+    ]
+    path = tmp_path / "requires-manifest.json"
+    path.write_text(json.dumps({"schemaVersion": 1, "modules": mods}), encoding="utf-8")
+    return path
+
+
+def test_verify_accepts_a_requires_that_names_a_module(tmp_path, root):
+    r = cli(["verify"], _requires_manifest(tmp_path, ["a"]), root)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("requires_b, said", [
+    (["nope"], "unknown module 'nope'"),
+    (["b"], "requires itself"),
+])
+def test_verify_rejects_a_requires_to_nothing_or_itself(tmp_path, root, requires_b, said):
+    r = cli(["verify"], _requires_manifest(tmp_path, requires_b), root)
+    assert r.returncode != 0
+    assert said in r.stdout + r.stderr
+
+
+def test_verify_rejects_a_requires_cycle(tmp_path, root):
+    path = _requires_manifest(tmp_path, ["a"])
+    m = json.loads(path.read_text(encoding="utf-8"))
+    m["modules"][0]["requires"] = ["b"]
+    path.write_text(json.dumps(m), encoding="utf-8")
+    r = cli(["verify"], path, root)
+    assert r.returncode != 0
+    assert "cycle" in r.stdout + r.stderr
+
+
+def test_list_shows_what_a_module_needs(tmp_path, root):
+    r = cli(["list"], _requires_manifest(tmp_path, ["a"]), root)
+    assert r.returncode == 0, r.stderr
+    assert "needs a" in r.stdout

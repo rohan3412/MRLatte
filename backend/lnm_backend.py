@@ -31,8 +31,14 @@ import io
 import base64
 import json
 from pathlib import Path
-import numpy as np
-import nibabel as nib
+try:
+    import numpy as np
+except ImportError:  # viewer-only build without the NumPy module: see core_packages.py
+    from core_packages import np
+try:
+    import nibabel as nib
+except ImportError:
+    from core_packages import nib
 from worker_common import resample_to_img
 
 

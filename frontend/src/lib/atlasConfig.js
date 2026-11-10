@@ -6,7 +6,7 @@ export const BASE_VOLUME = {
   url: "/atlases/mni152/mni152.nii.gz",
   colormap: "gray",
   opacity: 1.0,
-  description: "MNI152 ICBM linear T1 average · 0.74mm isotropic",
+  description: "MNI152 ICBM linear T1 average · 0.74 mm isotropic",
   isBase: true,
 };
 
@@ -16,7 +16,7 @@ export const NO_BASE = {
   id: "none",
   name: "No base image",
   url: null,
-  description: "No template is installed. Load a scan below, or reinstall the MNI152 template in the Atlas Manager.",
+  description: "No template is installed. Load a scan below, or reinstall the MNI152 template in the Atlas manager.",
 };
 
 // ===== Wang & Benson labels (used for crosshair tooltip & legends) =====

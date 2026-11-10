@@ -23,7 +23,7 @@ import {
  */
 // Where a finding is, if lqtpy said (0.6.0+): the first location's world
 // position, or null. See lqtpy docs/QC.md, "Locations".
-const findingMM = (f) => {
+export const findingMM = (f) => {
   const mm = f?.locations?.[0]?.mm;
   return Array.isArray(mm) && mm.length >= 3 && mm.every((v) => Number.isFinite(v)) ? mm : null;
 };

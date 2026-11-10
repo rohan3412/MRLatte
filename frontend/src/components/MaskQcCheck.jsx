@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { runLesionQc, qcFixedCopy } from "@/lib/lesionQc";
-import { LesionQcDialog } from "@/components/LesionQcDialog";
+import { LesionQcDialog, findingMM } from "@/components/LesionQcDialog";
+import { useLesionEngine } from "@/hooks/use-modules";
 
 /**
  * lqtpy's quality check on a LOADED lesion mask, on demand (inbox 28 Oct: a
@@ -14,6 +15,7 @@ import { LesionQcDialog } from "@/components/LesionQcDialog";
 export function MaskQcCheck({ lesion, userFileCache, mni, viewerRef, onAddFixedCopy }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null); // { flags, verdict, lesionId } while the dialog is open
+  const engine = useLesionEngine();
 
   const check = async () => {
     const file = userFileCache?.current?.[lesion.id]?.file;
@@ -29,8 +31,12 @@ export function MaskQcCheck({ lesion, userFileCache, mni, viewerRef, onAddFixedC
     }
     if (!r.flags.length) {
       toast.success("No issues found", { description: r.verdict ? `Overall: ${r.verdict}` : lesion.name });
+      viewerRef.current?.fxRingAroundLayer?.(lesion.id);
       return;
     }
+    // The viewer glides to the first finding that has a place, behind the list.
+    const first = r.flags.map(findingMM).find(Boolean);
+    if (first) viewerRef.current?.fxGlideTo?.(first);
     setResult({ ...r, fileName: file.name });
   };
 
@@ -38,8 +44,7 @@ export function MaskQcCheck({ lesion, userFileCache, mni, viewerRef, onAddFixedC
     const { lesionId, fileName } = result;
     setResult(null);
     try {
-      // Named after the mask's FILE: the layer's own name carries a "Lesion · "
-      // prefix that the new layer gets again on load.
+      // Named after the mask's FILE, as the new layer will be on load.
       const { file, removed } = await qcFixedCopy({ lesionId, findingId: finding.id, name: fileName });
       if (!file) { toast.info("Nothing to remove", { description: finding.label || finding.id }); return; }
       await onAddFixedCopy(file);
@@ -55,14 +60,16 @@ export function MaskQcCheck({ lesion, userFileCache, mni, viewerRef, onAddFixedC
     <div className="flex items-center gap-2" data-testid={`mask-qc-${lesion.id}`}>
       <span className="flex-1 text-[13px] text-muted-foreground">Quality check</span>
       <button
-        onClick={check}
+        onClick={engine.missing ? engine.install : check}
         disabled={busy}
         className="btn-mini"
-        title="Check this mask with lqtpy: stray specks, gaps between slices, parts outside the brain…"
+        title={engine.missing
+          ? "The quality check needs the LQTpy module. Opens the module store at it."
+          : "Check this mask with lqtpy: stray specks, gaps between slices, parts outside the brain…"}
         data-testid={`mask-qc-check-${lesion.id}`}
       >
         <ShieldCheck size={11} />
-        {busy ? "Checking…" : "Check"}
+        {engine.missing ? "Install LQTpy…" : busy ? "Checking…" : "Check"}
       </button>
       {result && (
         <LesionQcDialog

@@ -1,15 +1,42 @@
 // Browser-side volumetric analysis on niivue NVImage objects.
 // vol.img is the typed array of stored values; niivue does NOT apply hdr.scl_slope/
 // scl_inter to it (cal_min/cal_max and global_min/max are in the scaled units).
-// vol.dimsRAS is [3, nx, ny, nz] (length 4, reoriented to RAS).
-// vol.matRAS is the voxel->mm affine (column-major mat4).
+// vol.img is in the FILE's voxel order: hdr.dims and hdr.affine (rows) describe
+// it. vol.dimsRAS / vol.matRAS describe NiiVue's reoriented RAS frame instead
+// (matRAS stored row by row), which only the drawing bitmap is laid out in.
 
-export function getDims(vol) {
-  // Prefer dimsRAS (reoriented), fall back to dims (NIfTI header).
+/**
+ * The voxel grid `vol.img` is laid out in: { dims: [nx, ny, nz], A } with A
+ * the 3x4 voxel -> world-mm rows. A NiiVue volume: the file's own order
+ * (hdr.dims, hdr.affine). An array in NiiVue's RAS frame (the drawing, marked
+ * `rasOrder`), or a volume without a header: dimsRAS (or dims) and matRAS.
+ * Pairing `img` with matRAS instead put a flipped MNI mask in the wrong
+ * hemisphere, centred at its voxel indices (lib/voxelGrid.test.js).
+ */
+export function voxelGrid(vol) {
+  if (!vol) return null;
+  const h = vol.hdr;
+  if (!vol.rasOrder && h?.affine && h?.dims && h.dims[1] > 0 && h.dims[2] > 0 && h.dims[3] > 0) {
+    return { dims: [h.dims[1], h.dims[2], h.dims[3]], A: [0, 1, 2].map((r) => [0, 1, 2, 3].map((c) => h.affine[r][c])) };
+  }
   const d = vol.dimsRAS || vol.dims;
   if (!d) return null;
-  // d[0] = number of dims; d[1..3] = nx, ny, nz
-  return [d[1], d[2], d[3]];
+  const M = vol.matRAS;
+  const A = M ? [0, 1, 2].map((r) => [0, 1, 2, 3].map((c) => M[4 * r + c])) : [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]];
+  return { dims: [d[1], d[2], d[3]], A };
+}
+
+export function getDims(vol) {
+  return voxelGrid(vol)?.dims || null;
+}
+
+/** Whether two volumes' images share a grid: the same dimensions AND the same
+ *  voxel -> mm mapping (equal dimensions alone also match a flipped copy). */
+export function sameVoxelGrid(a, b, tol = 1e-3) {
+  const ga = voxelGrid(a);
+  const gb = voxelGrid(b);
+  if (!ga || !gb || ga.dims.some((n, i) => n !== gb.dims[i])) return false;
+  return ga.A.every((row, r) => row.every((v, c) => Math.abs(v - gb.A[r][c]) <= tol * Math.max(1, Math.abs(v))));
 }
 
 /**
@@ -114,14 +141,11 @@ export function affineDet3(M) {
   );
 }
 
+/** A voxel of `vol.img` (its own grid, see voxelGrid) to world mm. */
 export function voxToMM(vol, [i, j, k]) {
-  const M = vol.matRAS;
-  if (!M) return [i, j, k];
-  return [
-    M[0] * i + M[4] * j + M[8] * k + M[12],
-    M[1] * i + M[5] * j + M[9] * k + M[13],
-    M[2] * i + M[6] * j + M[10] * k + M[14],
-  ];
+  const g = voxelGrid(vol);
+  if (!g) return [i, j, k];
+  return g.A.map((r) => r[0] * i + r[1] * j + r[2] * k + r[3]);
 }
 
 /**
@@ -184,17 +208,25 @@ export function regionCentroidMM(vol, labelValue) {
   ];
 }
 
-export function mmToVox(vol, [x, y, z]) {
-  // Inverse of voxToMM via numerical inverse of 4x4 matrix M
-  const M = vol.matRAS;
-  if (!M) return [x, y, z];
-  // Compute inverse mat4 (column-major). Use gl-matrix style adjugate.
-  const inv = invertMat4(M);
-  if (!inv) return [x, y, z];
-  const i = inv[0] * x + inv[4] * y + inv[8] * z + inv[12];
-  const j = inv[1] * x + inv[5] * y + inv[9] * z + inv[13];
-  const k = inv[2] * x + inv[6] * y + inv[10] * z + inv[14];
-  return [i, j, k];
+// The same functions under the names ClusterPanel uses (they were the
+// file-grid versions while voxToMM/mmToVox still read matRAS).
+export const nativeDims = (vol) => getDims(vol);
+export const nativeVoxToMM = (vol, ijk) => voxToMM(vol, ijk);
+export const nativeMMToVox = (vol, mm) => mmToVox(vol, mm);
+
+/** World mm to a (fractional) voxel of `vol.img`: the inverse of voxToMM. */
+export function mmToVox(vol, mm) {
+  const g = voxelGrid(vol);
+  if (!g) return [...mm];
+  const [a, b, c] = g.A;
+  const det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+  if (!det) return [...mm];
+  const x = mm[0] - a[3], y = mm[1] - b[3], z = mm[2] - c[3];
+  return [
+    ((b[1] * c[2] - b[2] * c[1]) * x - (a[1] * c[2] - a[2] * c[1]) * y + (a[1] * b[2] - a[2] * b[1]) * z) / det,
+    (-(b[0] * c[2] - b[2] * c[0]) * x + (a[0] * c[2] - a[2] * c[0]) * y - (a[0] * b[2] - a[2] * b[0]) * z) / det,
+    ((b[0] * c[1] - b[1] * c[0]) * x - (a[0] * c[1] - a[1] * c[0]) * y + (a[0] * b[1] - a[1] * b[0]) * z) / det,
+  ];
 }
 
 export function invertMat4(m) {
@@ -241,7 +273,7 @@ export function invertMat4(m) {
 
 export function findClusters(vol, threshold, sign = "pos", minSize = 10) {
   if (!vol || !vol.img) return { clusters: [], stats: { reason: "no img" } };
-  const dims = getDims(vol);
+  const dims = nativeDims(vol);
   if (!dims) return { clusters: [], stats: { reason: "no dims" } };
   const [nx, ny, nz] = dims;
   const data = vol.img;
@@ -320,9 +352,9 @@ export function findClusters(vol, threshold, sign = "pos", minSize = 10) {
           size: members.length,
           peakValue: data[peakIdx],
           peakVox: [peakI, peakJ, peakK],
-          peakMM: voxToMM(vol, [peakI, peakJ, peakK]),
+          peakMM: nativeVoxToMM(vol, [peakI, peakJ, peakK]),
           centerVox: [centerI, centerJ, centerK],
-          centerMM: voxToMM(vol, [centerI, centerJ, centerK]),
+          centerMM: nativeVoxToMM(vol, [centerI, centerJ, centerK]),
         });
       }
     }
@@ -355,8 +387,7 @@ export function computeAtlasOverlap(lesionVol, atlasVol, labelMap) {
 
   const lImg = lesionVol.img;
   const aImg = atlasVol.img;
-  const sameGrid =
-    lnx === anx && lny === any && lnz === anz && lImg.length >= lnx * lny * lnz;
+  const sameGrid = sameVoxelGrid(lesionVol, atlasVol) && lImg.length >= lnx * lny * lnz;
 
   const lesionByRegion = {};
   const regionCount = {};
@@ -432,7 +463,7 @@ export function computeAtlasOverlap(lesionVol, atlasVol, labelMap) {
   };
 }
 
-export function clustersToCSV(clusters, atlasName = null, labelByVoxel = null) {
+export function clustersToCSV(clusters, atlasName = null, labelAtPeak = null) {
   const headers = ["cluster", "size_voxels", "peak_value",
     "peak_mni_x", "peak_mni_y", "peak_mni_z",
     "center_mni_x", "center_mni_y", "center_mni_z"];
@@ -442,17 +473,28 @@ export function clustersToCSV(clusters, atlasName = null, labelByVoxel = null) {
     const row = [i + 1, c.size, c.peakValue.toFixed(4),
       c.peakMM[0].toFixed(1), c.peakMM[1].toFixed(1), c.peakMM[2].toFixed(1),
       c.centerMM[0].toFixed(1), c.centerMM[1].toFixed(1), c.centerMM[2].toFixed(1)];
-    if (atlasName && labelByVoxel) row.push(`"${labelByVoxel(c.peakVox) || ""}"`);
+    if (atlasName && labelAtPeak) row.push(`"${labelAtPeak(c.peakMM) || ""}"`);
     lines.push(row.join(","));
   });
   return lines.join("\n");
 }
 
-export function overlapToCSV(rows, atlasName) {
-  const headers = ["region", "voxels", "percent_of_lesion", `percent_of_${atlasName}_region`];
+/**
+ * One table from several atlases' overlap breakdowns ({ atlasName, rows }),
+ * each row tagged with the atlas it came from. Atlases keep the order given,
+ * rows keep their order within each atlas (inbox 2 Nov: several atlases at
+ * once, with a column saying which atlas a row is from).
+ */
+export function flattenOverlap(breakdowns) {
+  return (breakdowns || []).flatMap((b) => (b.rows || []).map((r) => ({ ...r, atlasName: b.atlasName })));
+}
+
+export function overlapToCSV(rows) {
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const headers = ["atlas", "region", "voxels", "percent_of_lesion", "percent_of_region"];
   const lines = [headers.join(",")];
   for (const r of rows) {
-    lines.push([`"${r.regionName}"`, r.voxelCount, r.percentOfLesion.toFixed(2), r.percentOfRegion.toFixed(2)].join(","));
+    lines.push([q(r.atlasName), q(r.regionName), r.voxelCount, r.percentOfLesion.toFixed(2), r.percentOfRegion.toFixed(2)].join(","));
   }
   return lines.join("\n");
 }

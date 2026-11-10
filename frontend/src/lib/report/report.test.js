@@ -77,3 +77,32 @@ describe("the LQTpy Analysis report", () => {
     expect(html).toMatch(/<details class="collapsible"><summary>Show morphometry detail<\/summary>/);
   });
 });
+
+// Owner, 10 Nov: the streamline-disconnection line belongs to the report only
+// when Tract disconnection was ticked (and so ran).
+describe("lqtpy's streamline disconnection section", () => {
+  const frags = {
+    fragments: { morphometry: "<div>morph</div>" },
+    unavailable: { disconnection: "no tractogram installed" },
+    stylesheet: "",
+  };
+
+  test("is left out of the quick lesion report", () => {
+    const html = buildReport("lesion", { ...lesionModel, reportFragments: frags });
+    expect(html).toContain("morph");
+    expect(html).not.toMatch(/Streamline disconnection/);
+  });
+
+  test("is left out of an LQTpy Analysis run without tract disconnection", () => {
+    const html = buildSummaryReport({ lesionName: "t.nii.gz", lesionModel, reportFragments: frags });
+    expect(html).not.toMatch(/Streamline disconnection/);
+  });
+
+  test("is kept when tract disconnection ran", () => {
+    const html = buildSummaryReport({
+      lesionName: "t.nii.gz", lesionModel, reportFragments: frags,
+      tractModel: { nSelectedStreamlines: 1, nInputStreamlines: 10, pctSelected: 10, tractVolumeCm3: 1, affectedVoxels: 1, atlasBreakdowns: [] },
+    });
+    expect(html).toMatch(/Streamline disconnection: not available/);
+  });
+});

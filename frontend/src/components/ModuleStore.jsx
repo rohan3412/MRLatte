@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, HardDrive,
   Layers, Loader2, Package, RefreshCw, ShieldAlert, Trash2, Upload, Wrench, X, XCircle,
@@ -12,8 +12,8 @@ import {
   acceptsSideload, canPickFiles, cancelModuleJob, downloadSource, formatBytes,
   installModule, isInstallableType, isRedistributable, isSlotModule, jobIdOf,
   moduleFiles, moduleSha256, moduleSize, moduleStatus, pickSlotFile,
-  provenanceReview, sideloadModule, slotExtensions, slotInstallModule,
-  transferLabel, uninstallModule, upstreamSource, verifyModule,
+  provenanceReview, requiredFirst, sideloadModule, slotExtensions, slotInstallModule,
+  transferLabel, uninstallModule, upstreamSource, verifyModule, waitForModuleJob,
 } from "@/lib/modules";
 
 /**
@@ -266,6 +266,13 @@ export function ModuleRow({ module: m, job, freeBytes, focused, onInstall, onSid
   const [confirmLicence, setConfirmLicence] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // `requires`: what this module needs installed first (Install also installs
+  // those), and the installed modules that need this one (it can't go first).
+  const { modules: allModules } = useModules();
+  const needs = requiredFirst(m, allModules);
+  const nameOf = (id) => (allModules || []).find((x) => x.id === id)?.name || id;
+  const listNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]);
+  const neededBy = (m.requiredBy || []).map(nameOf);
 
   // Opened at this module (a section's install prompt): glide to it and light
   // it briefly, so the eye lands on the right row.
@@ -466,6 +473,12 @@ export function ModuleRow({ module: m, job, freeBytes, focused, onInstall, onSid
                   </>
                 )}
                 , checks each file against its pinned hash, then installs it.
+                {needs.length > 0 && (
+                  <span data-testid={`module-needs-${m.id}`}>
+                    {" "}It needs {listNames(needs.map((x) => `${x.name} (${moduleSize(x)})`))} too, which
+                    {needs.length === 1 ? " goes" : " go"} in first.
+                  </span>
+                )}
               </div>
               <LicenceBlock module={m} />
               {tooBig && (
@@ -482,7 +495,8 @@ export function ModuleRow({ module: m, job, freeBytes, focused, onInstall, onSid
                   className={PRIMARY}
                   data-testid={`module-store-confirm-install-${m.id}`}
                 >
-                  <Download size={11} /> Accept &amp; install
+                  <Download size={11} /> {needs.length === 0 ? "Accept & install"
+                    : needs.length === 1 ? "Accept & install both" : `Accept & install all ${needs.length + 1}`}
                 </button>
               </div>
             </div>
@@ -499,11 +513,18 @@ export function ModuleRow({ module: m, job, freeBytes, focused, onInstall, onSid
                     ? `Remove the file from ${m.slot?.directory || "the slot"}/? It goes to the Recycle Bin where possible.`
                     : `Remove this module and free ${moduleSize(m)}? Its files go to the Recycle Bin where possible.`}
                 {removeNote ? ` ${removeNote}` : ""}
+                {neededBy.length > 0 && (
+                  <span className="text-warn" data-testid={`module-needed-by-${m.id}`}>
+                    {" "}{listNames(neededBy)} {neededBy.length === 1 ? "needs" : "need"} it: remove
+                    {neededBy.length === 1 ? " that" : " those"} first.
+                  </span>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setConfirmUninstall(false)} className={BTN}>Keep</button>
                 <button
                   type="button"
+                  disabled={neededBy.length > 0}
                   onClick={() => { setConfirmUninstall(false); onUninstall(m); }}
                   className={`${BTN} border-destructive/50 text-destructive hover:text-destructive`}
                   data-testid={`module-store-confirm-uninstall-${m.id}`}
@@ -662,6 +683,10 @@ export function deferRemoval(name, run, undo) {
   });
 }
 
+// Job phases that put a module in place (setJob's `phase` below); verify and
+// uninstall are not installs.
+const INSTALL_PHASES = new Set(["install", "repair", "sideload", "copy", "register"]);
+
 /**
  * The per-module actions (install, sideload, slot install, verify, uninstall,
  * cancel) and their job state. Shared by the Module Store and the Atlas
@@ -669,7 +694,7 @@ export function deferRemoval(name, run, undo) {
  * installed.
  */
 export function useModuleActions({ onChanged } = {}) {
-  const { refresh } = useModules();
+  const { refresh, reportInstalling } = useModules();
   const changed = useCallback(() => { refresh(); onChanged?.(); }, [refresh, onChanged]);
 
   const { jobs, setJob, clearJob } = useModuleJobs({
@@ -680,6 +705,14 @@ export function useModuleActions({ onChanged } = {}) {
       changed();
     },
   });
+
+  // How many of this instance's jobs are installs still running, for the
+  // toolbar's store icon (ModuleProvider sums the store's and the Atlas
+  // Manager's counts).
+  const source = useId();
+  const installing = Object.values(jobs).filter((j) => j && !j.done && INSTALL_PHASES.has(j.phase)).length;
+  useEffect(() => { reportInstalling(source, installing); }, [reportInstalling, source, installing]);
+  useEffect(() => () => reportInstalling(source, 0), [reportInstalling, source]);
 
   // Aborts for in-flight sideload uploads (an upload is a live XHR, not a
   // backend job, so /cancel cannot stop it).
@@ -724,6 +757,22 @@ export function useModuleActions({ onChanged } = {}) {
   const onInstall = useCallback(async (m, { repair } = {}) => {
     const phase = repair ? "repair" : "install";
     setJob(m.id, { phase, done: false, stage: "starting", progress: null, jobId: null, error: null, result: null });
+    // What it needs goes in first, one after another (the backend refuses the
+    // module until they are there). Each shows its own progress on its row.
+    for (const req of m.missingRequires || []) {
+      setJob(m.id, { stage: `waiting for ${req}` });
+      const res = await installModule(req);
+      const jobId = res.ok ? jobIdOf(res.data) : null;
+      if (jobId) setJob(req, { phase: "install", jobId, done: false, stage: "queued", progress: null });
+      const job = jobId ? await waitForModuleJob(jobId) : null;
+      const error = !res.ok ? res.error : job?.error || (job?.cancelled ? "cancelled" : null);
+      if (error) {
+        const why = `needs ${req}, whose install failed: ${error}`;
+        setJob(m.id, { phase, done: true, error: why, stage: "error" });
+        toast.error(`${phase} failed`, { description: why });
+        return;
+      }
+    }
     finish(m.id, await installModule(m.id, { repair: !!repair }), phase);
   }, [setJob, finish]);
 
@@ -923,7 +972,7 @@ export function ModuleStore() {
                     className={BTN}
                     data-testid="module-store-open-atlas-manager"
                   >
-                    Open Atlas Manager
+                    Open the atlas manager
                   </button>
                 </div>
               )}

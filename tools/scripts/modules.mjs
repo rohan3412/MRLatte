@@ -395,6 +395,33 @@ const TYPE_SECTIONS = [
   ['python-package', 'PYTHON PACKAGE', 'installed with pip, not by this CLI'],
 ];
 
+/** What is wrong with the manifest's `requires` fields: a module needed that
+ *  the manifest doesn't have, one that needs itself, or a cycle. The backend
+ *  copes with all three (it never loops), but the manifest is still wrong. */
+function requiresProblems(manifest) {
+  const byId = new Map(manifest.modules.map((e) => [e.id, e]));
+  const problems = [];
+  for (const e of manifest.modules) {
+    for (const r of e.requires || []) {
+      if (r === e.id) problems.push(`${e.id} requires itself`);
+      else if (!byId.has(r)) problems.push(`${e.id} requires unknown module '${r}'`);
+    }
+  }
+  const state = new Map();                      // id -> 'walking' | 'done'
+  const walk = (id, trail) => {
+    if (state.get(id) === 'done' || !byId.has(id)) return;
+    if (state.get(id) === 'walking') {
+      problems.push(`requires cycle: ${[...trail.slice(trail.indexOf(id)), id].join(' -> ')}`);
+      return;
+    }
+    state.set(id, 'walking');
+    for (const r of byId.get(id).requires || []) if (r !== id) walk(r, [...trail, id]);
+    state.set(id, 'done');
+  };
+  for (const e of manifest.modules) walk(e.id, []);
+  return problems;
+}
+
 function cmdList(manifest, opts) {
   const rows = manifest.modules.map((e) => ({ entry: e, st: state(e) }));
 
@@ -407,6 +434,7 @@ function cmdList(manifest, opts) {
         id: entry.id, type: st.type, tier: entry.tier || 'optional',
         state: st.state, resolvedFrom: st.tier, bytes: entry.bytes || 0,
         unlocks: entry.unlocks || [],
+        requires: entry.requires || [],
         downloadable: st.type === 'data' && Boolean(downloadUrl(entry)),
       })),
     }, null, 2));
@@ -450,6 +478,7 @@ function cmdList(manifest, opts) {
         out(dim(`        pip install ${(entry.pythonPackages || []).join(' ')}`));
       }
       if (unlocks) out(dim(`        unlocks ${unlocks}`));
+      if ((entry.requires || []).length) out(dim(`        needs ${entry.requires.join(', ')}`));
     }
   }
 
@@ -1072,7 +1101,9 @@ async function cmdVerify(manifest, args, opts) {
   }
   out('');
   out(corrupt ? red(`${corrupt} corrupt file(s).`) : green('No corrupt files.'));
-  return corrupt ? 1 : 0;
+  const problems = requiresProblems(manifest);
+  for (const p of problems) out(red(`manifest: ${p}`));
+  return corrupt || problems.length ? 1 : 0;
 }
 
 // === remove ==================================================================

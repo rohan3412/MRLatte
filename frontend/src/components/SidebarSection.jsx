@@ -1,7 +1,14 @@
 import React from "react";
-import { ChevronDown, ChevronRight, ChevronUp, RefreshCw } from "lucide-react";
-import { useCapability, useModulesFor } from "@/hooks/use-modules";
-import { moduleSize, moduleStatus } from "@/lib/modules";
+import { createPortal } from "react-dom";
+import { ChevronDown, ChevronRight, ChevronUp, GripVertical, RefreshCw } from "lucide-react";
+import { useCapability, useModules, useModulesFor } from "@/hooks/use-modules";
+import { usePreference } from "@/lib/preferences";
+import { effectsOn } from "@/lib/viewer/effects";
+import { SECTION_IDS, effectiveOrder } from "@/lib/sections";
+import { SIDES, moveBefore, sectionDropTarget } from "@/lib/panelLayout";
+import { DockedFrame, FloatingCard, GripButton, dropPanel, floatAt, useDockSlot, useGripDrag, usePlacement } from "@/components/Movable";
+import { moduleSize, moduleStatus, toInstallFor } from "@/lib/modules";
+import { retryFailedLazyLoads } from "@/lib/lazyWithRetry";
 
 // Error boundary that catches chunk-load failures (and any other render error)
 // inside a SidebarSection. Shows a minimal inline fallback with a Refresh
@@ -19,6 +26,9 @@ class ChunkErrorBoundary extends React.Component {
     return { hasError: true, isChunkError };
   }
   reset() {
+    // A panel whose code failed to download gets a fresh attempt (React would
+    // otherwise re-throw the remembered failure: lib/lazyWithRetry.js).
+    retryFailedLazyLoads();
     this.setState({ hasError: false, isChunkError: false });
   }
   render() {
@@ -144,7 +154,25 @@ export const SidebarSection = ({
 }) => {
   const has = useCapability(capability || "__none__");
   const neededModules = useModulesFor(capability || "__none__");
+  const { modules: allModules } = useModules();
   const unavailable = available === false || (!!capability && has === false);
+  // Preferences: leave a section out while its module is missing. Never while
+  // module status is still loading (unavailable is then false, not hidden).
+  const [hideUnavailable] = usePreference("hideUnavailableSections");
+  // Preferences ▸ Sidebar: left out by choice (or by a preset), and its place
+  // in a custom order (CSS order in the sidebar, a sort in the rail).
+  const [leftOut] = usePreference("hiddenSections");
+  const [savedOrder, setSavedOrder] = usePreference("sectionOrder");
+  const hidden = (hideUnavailable && unavailable) || leftOut.includes(testId);
+  const order = savedOrder.length ? effectiveOrder(savedOrder).indexOf(testId) : -1;
+  // Its module just installed: the section glows once as it unlocks (or
+  // slides back in, when hidden while unusable). Not on first load.
+  const wasUnavailable = React.useRef(unavailable);
+  const [unlocked, setUnlocked] = React.useState(false);
+  React.useEffect(() => {
+    if (wasUnavailable.current && !unavailable && effectsOn()) setUnlocked(true);
+    wasUnavailable.current = unavailable;
+  }, [unavailable]);
   const [openState, setOpenState] = React.useState(defaultOpen);
   const isControlled = openProp !== undefined;
   const open = isControlled ? openProp : openState;
@@ -166,35 +194,104 @@ export const SidebarSection = ({
   const setOpenRef = React.useRef(setOpen);
   setOpenRef.current = setOpen;
   React.useEffect(() => {
-    if (!ctl) return undefined;
+    if (!ctl || hidden) return undefined;
     return ctl.register(id, {
       isOpen: openRef.current,
       setOpen: (v) => setOpenRef.current(v),
     });
-  }, [ctl, id]);
+  }, [ctl, id, hidden]);
   React.useEffect(() => { ctl?.report(id, open); }, [ctl, id, open]);
 
   // What a greyed-out section needs, shown as a pill on its row: one
   // missing module names its size, several are counted.
-  const missing = neededModules.filter((m) => moduleStatus(m) !== "installed");
+  const missing = toInstallFor(neededModules, allModules).filter((m) => moduleStatus(m) !== "installed");
   const gatePill = !unavailable ? null
     : missing.length === 1 ? (moduleSize(missing[0]) === "unknown size" ? "Install" : `Install · ${moduleSize(missing[0])}`)
     : missing.length > 1 ? `Add ${missing.length} modules`
     : null;
 
   React.useEffect(() => {
-    ctl?.describe(id, { testId, title, icon: Icon, badge, unavailable, gatePill });
-  }, [ctl, id, testId, title, Icon, badge, unavailable, gatePill]);
+    ctl?.describe(id, { testId, title, icon: Icon, badge, unavailable, gatePill, order });
+  }, [ctl, id, testId, title, Icon, badge, unavailable, gatePill, order]);
+
+  // Movable panels: a grip on the row drags the section. Over the sidebar it
+  // reorders (the same saved order as Preferences ▸ Sections); on a viewer
+  // edge it docks there; anywhere else it floats as a card. Its content is
+  // rendered once into a detached element that is moved between the sidebar,
+  // the dock and the card, so its state survives the move.
+  const move = usePlacement(testId, "movableSections");
+  const floating = move.allowed && move.placement.dock === "float";
+  const docked = move.allowed && SIDES.includes(move.placement.dock);
+  const dockEl = useDockSlot(testId, docked);
+  const dockSlot = React.useRef(null);
+  const host = React.useMemo(() => {
+    if (!move.allowed) return null;
+    const el = document.createElement("div");
+    el.className = "space-y-2.5";
+    return el;
+  }, [move.allowed]);
+  const inlineSlot = React.useRef(null);
+  const floatSlot = React.useRef(null);
+  React.useLayoutEffect(() => {
+    const to = floating ? floatSlot.current : docked ? dockSlot.current : inlineSlot.current;
+    if (host && to && host.parentNode !== to) to.appendChild(host);
+  });
+  const rootRef = React.useRef(null);
+  const sectionTarget = (x, y) => {
+    const nav = rootRef.current?.closest("nav");
+    const r = nav?.getBoundingClientRect();
+    if (!r || x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+    const items = [...nav.querySelectorAll("[data-section]")]
+      .filter((el) => el !== rootRef.current && el.getBoundingClientRect().height > 0)
+      .map((el) => { const b = el.getBoundingClientRect(); return { id: el.dataset.testid, top: b.top, bottom: b.bottom }; });
+    return { type: "reorder", ...sectionDropTarget(items, y), left: r.left, width: r.width };
+  };
+  const { onGripDown, overlay } = useGripDrag({
+    title,
+    kind: testId,
+    extraTarget: sectionTarget,
+    onDrop: (target, p) => {
+      if (target?.type === "reorder") {
+        const next = moveBefore(effectiveOrder(savedOrder), testId, target.beforeId);
+        setSavedOrder(next.every((sid, i) => sid === SECTION_IDS[i]) ? [] : next);
+        if (floating || docked) move.dispatch({ type: "home" });
+      } else {
+        dropPanel(move.dispatch, target, p, { w: 340, h: 200 });
+        setOpen(true);
+      }
+    },
+  });
+  const away = floating || docked;
+
+  if (hidden) return null;
+
+  const body = (
+    <React.Suspense
+      fallback={
+        <div className="py-2 text-[12px] text-subtle">
+          Loading…
+        </div>
+      }
+    >
+      <ChunkErrorBoundary>
+        {children}
+      </ChunkErrorBoundary>
+    </React.Suspense>
+  );
 
   return (
     <div
-      className={`rounded-lg transition-colors ${open ? "my-1 border border-border bg-card" : "border border-transparent"}`}
+      ref={rootRef}
+      data-section=""
+      className={`group/section relative rounded-lg transition-colors ${open || away ? "my-1 border border-border bg-card" : "border border-transparent"} ${unlocked ? "glow-once" : ""}`}
+      onAnimationEnd={(e) => { if (e.animationName === "glow-once") setUnlocked(false); }}
+      style={order >= 0 ? { order } : undefined}
       data-open={open}
       data-testid={testId}
     >
       <button
-        onClick={toggle}
-        aria-expanded={open}
+        onClick={away ? () => { move.dispatch({ type: "home" }); setOpen(true); } : toggle}
+        aria-expanded={open && !away}
         className={`flex h-[38px] w-full items-center gap-2.5 px-2.5 text-left transition-colors ${
           open ? "rounded-t-lg" : "rounded-md hover:bg-panel-hover"
         }`}
@@ -211,9 +308,10 @@ export const SidebarSection = ({
           />
         )}
         <span
-          className={`min-w-0 flex-1 truncate text-[13.5px] ${open ? "font-semibold" : "font-medium"} ${
+          className={`min-w-[4.5rem] flex-1 truncate text-[13.5px] ${open ? "font-semibold" : "font-medium"} ${
             unavailable ? "text-muted-foreground" : "text-foreground"
           }`}
+          title={typeof title === "string" ? title : undefined}
         >
           {title}
         </span>
@@ -224,31 +322,48 @@ export const SidebarSection = ({
           <span className="count" title="Shown now">{badge}</span>
         )}
         {gatePill && (
-          <span className="whitespace-nowrap rounded-full border border-edge px-2 text-[11.5px] leading-[18px] text-muted-foreground">
+          <span className="min-w-0 truncate whitespace-nowrap rounded-full border border-edge px-2 text-[11.5px] leading-[18px] text-muted-foreground">
             {gatePill}
           </span>
         )}
-        {open ? (
+        {away && (
+          <span className="whitespace-nowrap rounded-full border border-edge px-2 text-[11.5px] leading-[18px] text-muted-foreground"
+            title="Click to put it back here">{floating ? "Floating" : "Docked"}</span>
+        )}
+        {away ? null : open ? (
           <ChevronDown size={14} className="flex-shrink-0 text-muted-foreground" />
         ) : (
           <ChevronRight size={14} className="flex-shrink-0 text-subtle" />
         )}
       </button>
-      {(open || keepMounted) && (
+      {move.allowed && !away && (
+        <span className="absolute right-7 top-[5px] opacity-0 transition-opacity focus-within:opacity-100 group-hover/section:opacity-100">
+          <GripButton title={title} kind={testId} onPointerDown={onGripDown} hint="double-click to float it" className="h-7 w-7 bg-card"
+            onDoubleClick={(e) => {
+              const pos = floatAt({ x: e.clientX, y: e.clientY }, { w: 340, h: 200 });
+              move.dispatch({ type: "float", x: pos.x, y: pos.y });
+              setOpen(true);
+            }} />
+        </span>
+      )}
+      {overlay}
+      {move.allowed && (open || keepMounted || away) && createPortal(body, host)}
+      {floating && (
+        <FloatingCard kind={testId} title={title} size={{ w: 340 }} placement={move.placement} dispatch={move.dispatch}>
+          <div ref={floatSlot} className="p-2.5" />
+        </FloatingCard>
+      )}
+      {docked && dockEl && createPortal(
+        <DockedFrame kind={testId} title={title} icon={Icon} onGripDown={onGripDown} onHome={() => move.dispatch({ type: "home" })}>
+          <div ref={dockSlot} className="p-2.5" />
+        </DockedFrame>, dockEl)}
+      {(open || keepMounted) && !away && (
         <div className={`space-y-2.5 px-2.5 pb-2 pt-0.5 ${open ? "" : "hidden"}`}>
           {/* Suspense boundary so lazily code-split panels can stream their chunk
-              on first open without a top-level fallback flashing the whole UI. */}
-          <React.Suspense
-            fallback={
-              <div className="py-2 text-[12px] text-subtle">
-                Loading…
-              </div>
-            }
-          >
-            <ChunkErrorBoundary>
-              {children}
-            </ChunkErrorBoundary>
-          </React.Suspense>
+              on first open without a top-level fallback flashing the whole UI.
+              With movable panels on, `body` is rendered into a detached element
+              (see `host` above) that sits here, or in the floating card. */}
+          {move.allowed ? <div ref={inlineSlot} className="contents" /> : body}
           {/* Item: per-section close row, reuses the existing toggle/setOpen
               handler (no new state). Lives inside the same open/keepMounted
               content div as `children`, so the shared `hidden` class above

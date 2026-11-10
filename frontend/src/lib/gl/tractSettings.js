@@ -15,7 +15,10 @@ export const DEFAULT_TRACT_RENDER = {
   // lib/gl/tractBuffers.js — bindTractGeometry draws nothing for any geometry
   // other than 'lines' without the compacted instanced buffer.
   geometry: "tubes",
-  lighting: false,         // mrview parity: off by default
+  // On: shading is what makes a pseudotube read as a tube (and a point as a
+  // bead) rather than a flat stroke (inbox 6 Nov: the modes looked alike).
+  // Lines ignore it. Was off, for mrview parity.
+  lighting: true,
   thicknessUI: 50,         // 0..100 slider position
   // slabEnabled is
   // gone — the slab is always on, so there is no "off" state to

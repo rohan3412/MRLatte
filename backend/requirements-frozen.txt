@@ -29,31 +29,15 @@
 # Installed into the embeddable Python via:
 #   py -3.11 -m pip install --target MyApp_Files\python\site-packages -r requirements-frozen.txt
 #
-# Keep this list in sync with requirements.txt when runtime deps change.
+# Keep this list in sync with requirements.txt when runtime deps change. The
+# server-and-store part lives in requirements-core.txt (the viewer-only build).
 
-fastapi==0.110.1
-uvicorn==0.25.0
-python-dotenv>=1.0.1
-pydantic>=2.6.4
-tzdata>=2024.2
-requests>=2.31.0
+-r requirements-core.txt
 numpy>=1.26.0
-python-multipart>=0.0.9
 nibabel>=5.0.0
-scipy>=1.11.0
 # SimpleITK (longitudinal) and neuropythy (validation) are optional stacks:
 # requirements-longitudinal.txt / requirements-validation.txt, full installer only.
-dcm2niix>=1.0.20220505
-Send2Trash>=1.8.2  # runtime: module uninstall recycles slot payloads instead of deleting them (routers/modules.py:_remove_payload). Pure Python, no transitive deps.
 
-# lqtpy: lesion-metrics engine (backend/lesion_metrics.py, routers/lesion_metrics.py).
-# Pinned to a RELEASE WHEEL, not a git ref. A commit pin broke a build once
-# already: rewriting lqtpy's history made the pinned SHA unreachable and
-# `git fetch` failed with exit 128. A release asset is a stored file, so it
-# survives any later history rewrite. pip verifies the #sha256 and refuses the
-# install on mismatch, so a swapped asset fails loudly instead of shipping
-# different code. This also removes `git` as a build-machine prerequisite —
-# pip just downloads over HTTPS (see tools/build/assemble-bundle.ps1 step 2/5).
-# To upgrade: bump lqtpy's version, build the wheel, publish a release, then
-# update this URL and hash together.
-lqtpy @ https://github.com/rohan3412/LQTpy/releases/download/v0.7.0/lqtpy-0.7.0-py3-none-any.whl#sha256=88b8e6ae6c24fa591a2acbdd92145888b382347fb43f16a14b227e7ae8e59af2
+# SciPy and lqtpy are modules since 0.6.0, not part of the core install:
+# requirements-scipy.txt / requirements-lqtpy.txt (full installer only; everyone
+# else installs them from the module store). Do not re-add them here.

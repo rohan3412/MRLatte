@@ -46,7 +46,7 @@ export function SaveWorkspaceDialog({ open, onClose, onChoose, canLink, alwaysEm
           >
             <Link2 size={15} className="mt-0.5 shrink-0" />
             <span className="space-y-0.5">
-              <span className="block text-[13px] font-medium">Small — link to the files <span className="font-normal text-muted-foreground">(recommended)</span></span>
+              <span className="block text-[13px] font-medium">Small — link to the files {canLink && <span className="font-normal text-muted-foreground">(recommended)</span>}</span>
               <span className="block text-[11.5px] text-muted-foreground leading-snug">
                 {canLink
                   ? "Saves where each scan is, not a copy. Opens wherever those files are at the same place (this computer, a shared drive). If a file has moved, MRLatte says which."
