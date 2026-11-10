@@ -19,6 +19,15 @@
 //   5. a quick report for the opened lesion is made.
 // Screenshots of each step go to the folder (a CI artifact), so a person can
 // look at what the runner drew.
+//
+// Settings from the environment (the workflows set them):
+//   UI_SMOKE_RETRIES  how many more times to try with a fresh app and profile
+//                     after a failure (default 0). A pass on a retry still
+//                     prints a warning, so flakiness stays visible.
+//   UI_SMOKE_FLAGS    extra app flags, space-separated (e.g. a renderer choice)
+//   UI_SMOKE_SIZE     the window's size, WIDTHxHEIGHT (default 1280x800)
+// When a step fails, the app's processes are sampled (where each is stuck)
+// into the screenshot folder, before anything else touches the page.
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -28,11 +37,18 @@ const [exe, outDir = "ui-shots"] = process.argv.slice(2);
 if (!exe) { console.error("usage: node ui-smoke.mjs <app executable> <screenshot folder>"); process.exit(2); }
 if (typeof WebSocket !== "function") { console.error("ui-smoke needs Node 22 or later (built-in WebSocket)"); process.exit(2); }
 
-const PORT = 9300 + Math.floor(Math.random() * 500);
+const RETRIES = Math.max(0, parseInt(process.env.UI_SMOKE_RETRIES || "0", 10) || 0);
+const EXTRA_FLAGS = (process.env.UI_SMOKE_FLAGS || "").split(/\s+/).filter(Boolean);
+const [WIDTH, HEIGHT] = (/^(\d+)x(\d+)$/.exec(process.env.UI_SMOKE_SIZE || "") || [0, 1280, 800]).slice(1).map(Number);
+const CI = !!process.env.GITHUB_ACTIONS;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (m) => console.log(`  ok  ${m}`);
-let failed = false;
-const fail = (m) => { console.log(`UI SMOKE FAIL: ${m}`); failed = true; };
+// Per attempt (run() resets them): the DevTools port, the shots' name prefix,
+// and what failed.
+let PORT = 0;
+let prefix = "";
+let failures = [];
+const fail = (m) => { console.log(`UI SMOKE FAIL: ${m}`); failures.push(m); };
 mkdirSync(outDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
@@ -115,7 +131,7 @@ async function shot(page, name, selector = '[data-testid="viewer-main"]') {
   const { result } = await page.send("Page.captureScreenshot", { format: "png" });
   const data = result?.data;
   if (!data) throw new Error("no screenshot");
-  writeFileSync(path.join(outDir, `${name}.png`), Buffer.from(data, "base64"));
+  writeFileSync(path.join(outDir, `${prefix}${name}.png`), Buffer.from(data, "base64"));
   return page.evaluate(`(async () => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return null;
@@ -154,28 +170,33 @@ const lesionCount = (page) => page.evaluate(`(() => {
 })()`);
 
 // ---------------------------------------------------------------------------
-const tmp = mkdtempSync(path.join(os.tmpdir(), "mrlatte-ui-"));
-const env = { ...process.env, MRLATTE_USER_DATA_DIR: path.join(tmp, "user") };
-if (process.platform === "win32") env.LOCALAPPDATA = path.join(tmp, "local");
-const maskFile = path.join(tmp, "ui-smoke-lesion.nii");
-writeMask(maskFile);
-// Software GL on CI runners: Chromium may refuse WebGL on a blocklisted GPU.
-// Linux: the unpacked app's chrome-sandbox isn't setuid outside an install.
-const flags = [`--remote-debugging-port=${PORT}`, "--ignore-gpu-blocklist"];
-if (process.platform === "linux") flags.push("--no-sandbox");
+// One attempt's state: a throwaway profile, the app and its windows.
+let tmp, env, maskFile, app, appLog, pages;
 
-const app = spawn(exe, flags, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-let appLog = "";
-app.stdout.on("data", (d) => { appLog += d; });
-app.stderr.on("data", (d) => { appLog += d; });
-const pages = [];
+function startApp() {
+  PORT = 9300 + Math.floor(Math.random() * 500);
+  tmp = mkdtempSync(path.join(os.tmpdir(), "mrlatte-ui-"));
+  env = { ...process.env, MRLATTE_USER_DATA_DIR: path.join(tmp, "user") };
+  if (process.platform === "win32") env.LOCALAPPDATA = path.join(tmp, "local");
+  maskFile = path.join(tmp, "ui-smoke-lesion.nii");
+  writeMask(maskFile);
+  // Software GL on CI runners: Chromium may refuse WebGL on a blocklisted GPU.
+  // Linux: the unpacked app's chrome-sandbox isn't setuid outside an install.
+  const flags = [`--remote-debugging-port=${PORT}`, "--ignore-gpu-blocklist", ...EXTRA_FLAGS];
+  if (process.platform === "linux") flags.push("--no-sandbox");
+  app = spawn(exe, flags, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  appLog = "";
+  app.stdout.on("data", (d) => { appLog += d; });
+  app.stderr.on("data", (d) => { appLog += d; });
+  pages = [];
+}
 
 async function main() {
   // 1. Window, template, first run.
   const first = await until("the app window", async () => (await appPages())[0], 180000, 500);
   const page = await connect(first.webSocketDebuggerUrl);
   pages.push(page);
-  await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await page.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
   await until("the MNI152 template", () => page.evaluate(`/MNI152/.test(document.title) && !!document.querySelector("#niivue-canvas")`), 180000);
   await until("first-run screen handled", async () => {
     await click(page, "first-run-skip-all");
@@ -207,7 +228,7 @@ async function main() {
   const win2 = await until("a window for the opened file", async () => (await appPages()).find((t) => !before.has(t.id)), 90000, 500);
   const page2 = await connect(win2.webSocketDebuggerUrl);
   pages.push(page2);
-  await page2.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await page2.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
   await until("the Lesion masks section", () => openSection(page2, "section-lesion"), 60000);
   await until("the opened mask as a lesion", async () => (await lesionCount(page2)) >= 1
     && page2.evaluate(`document.body.innerText.includes("ui-smoke-lesion")`), 90000);
@@ -272,29 +293,93 @@ async function main() {
 }
 
 function stopApp() {
-  for (const p of pages) p.close();
+  for (const p of pages || []) p.close();
   try {
     if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore" });
     else process.kill(-app.pid, "SIGKILL");
   } catch { /* already gone */ }
 }
 
-const watchdog = setTimeout(() => { fail("took longer than 20 minutes"); stopApp(); process.exit(1); }, 20 * 60 * 1000);
-try {
-  await main();
-} catch (e) {
-  fail(e.message);
-  for (const [i, p] of pages.entries()) {
-    try {
-      await shot(p, `zz-failure-window${i + 1}`, "body");
-      console.log(`--- window ${i + 1} text:`);
-      console.log(String(await p.evaluate("document.body.innerText")).slice(0, 1500));
-    } catch { /* no page */ }
+// Where each of the app's processes is right now, saved into the shots folder
+// (a frozen page shows here as a busy or blocked renderer or GPU process).
+// macOS: a native stack sample of each process; Linux: CPU, state and kernel
+// wait channel; Windows: CPU and whether each window still responds.
+function sampleProcesses(tag) {
+  const out = [];
+  const run = (cmd, args, ms = 20000) => {
+    try { return execFileSync(cmd, args, { encoding: "utf8", timeout: ms, maxBuffer: 32 * 1024 * 1024 }); }
+    catch (e) { return String(e.stdout || e.message || ""); }
+  };
+  if (process.platform === "darwin") {
+    const appDir = exe.split("/Contents/")[0];
+    const ps = run("ps", ["-axo", "pid=,pcpu=,etime=,command="]);
+    const mine = ps.split("\n").filter((l) => l.includes(appDir));
+    out.push("processes (pid, %cpu, elapsed, command):", ...mine.map((l) => "  " + l.trim().slice(0, 220)));
+    for (const l of mine) {
+      const pid = l.trim().split(/\s+/)[0];
+      const kind = (/--type=(\S+)/.exec(l) || [0, "main"])[1];
+      const file = path.join(outDir, `${prefix}${tag}-sample-${kind}-${pid}.txt`);
+      run("sample", [pid, "2", "-file", file], 30000);
+      out.push(`  sampled ${kind} (${pid}) -> ${path.basename(file)}`);
+    }
+  } else if (process.platform === "linux") {
+    const ps = run("ps", ["-eo", "pid,ppid,pcpu,stat,wchan:24,etime,args"]);
+    out.push(...ps.split("\n").filter((l, i) => i === 0 || l.includes(exe)).map((l) => "  " + l.slice(0, 220)));
+  } else {
+    // Only this exe's processes: an installed MRLatte may be running too.
+    const exePath = path.resolve(exe).replace(/'/g, "''");
+    out.push(run("powershell", ["-NoProfile", "-Command",
+      `Get-Process MRLatte -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq '${exePath}' } | Select-Object Id,CPU,Responding,MainWindowTitle | Format-Table -AutoSize | Out-String -Width 200`]));
   }
+  const text = out.join("\n");
+  writeFileSync(path.join(outDir, `${prefix}${tag}-processes.txt`), text);
+  console.log(`--- the app's processes when it failed (${prefix}${tag}-*.txt in the shots folder):`);
+  console.log(text.split("\n").slice(0, 40).join("\n"));
 }
-clearTimeout(watchdog);
-if (failed) { console.log("--- app output:"); console.log(appLog.split("\n").slice(-60).join("\n")); }
-stopApp();
-await sleep(1500);
-try { rmSync(tmp, { recursive: true, force: true }); } catch { /* still locked: the OS cleans temp */ }
-process.exit(failed ? 1 : 0);
+
+// One attempt with a fresh app and profile. Returns what failed ([] = passed).
+async function run(attempt) {
+  prefix = attempt > 1 ? `retry${attempt - 1}-` : "";
+  failures = [];
+  startApp();
+  const watchdog = setTimeout(() => { fail("took longer than 20 minutes"); sampleProcesses("timeout"); stopApp(); process.exit(1); }, 20 * 60 * 1000);
+  try {
+    await main();
+  } catch (e) {
+    fail(e.message);
+    // First, while it is still stuck: where each process is.
+    sampleProcesses("failure");
+    for (const [i, p] of pages.entries()) {
+      try {
+        await shot(p, `zz-failure-window${i + 1}`, "body");
+        console.log(`--- window ${i + 1} text:`);
+        console.log(String(await p.evaluate("document.body.innerText")).slice(0, 1500));
+      } catch { /* the page doesn't answer */ }
+    }
+  }
+  clearTimeout(watchdog);
+  if (failures.length && failures.some((m) => !/^took longer/.test(m))) {
+    console.log("--- app output:");
+    console.log(appLog.split("\n").slice(-60).join("\n"));
+  }
+  stopApp();
+  await sleep(1500);
+  try { rmSync(tmp, { recursive: true, force: true }); } catch { /* still locked: the OS cleans temp */ }
+  return failures;
+}
+
+const tries = [];
+for (let attempt = 1; attempt <= 1 + RETRIES; attempt++) {
+  if (attempt > 1) console.log(`--- retrying with a fresh app and profile (attempt ${attempt} of ${1 + RETRIES})`);
+  const f = await run(attempt);
+  tries.push(f);
+  if (!f.length) break;
+}
+const passed = !tries[tries.length - 1].length;
+if (passed && tries.length > 1) {
+  const first = tries[0].join("; ");
+  console.log(`  ok  passed on retry ${tries.length - 1} (attempt 1 failed: ${first})`);
+  // A pass that needed a retry is flaky: say so on the run's summary page.
+  if (CI) console.log(`::warning title=On-screen test passed only on retry::Attempt 1 failed: ${first}. See the ui-shots artifact (files starting with zz- and the process samples).`);
+}
+process.exit(passed ? 0 : 1);

@@ -76,8 +76,11 @@ jobs:
         shell: bash
         run: bash tools/build/win-smoke-test.sh app
 
+      # One retry with a fresh app; a pass on retry still warns on the run's page.
       - name: On-screen test
         shell: bash
+        env:
+          UI_SMOKE_RETRIES: "1"
         run: node tools/build/ui-smoke.mjs ../MRLatte-build/electron/win-unpacked/MRLatte.exe ui-shots
 
       - uses: actions/upload-artifact@v4

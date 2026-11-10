@@ -63,7 +63,10 @@ jobs:
       - name: Smoke test the app
         run: xvfb-run -a -s "-screen 0 1280x800x24" bash tools/build/linux-smoke-test.sh app
 
+      # One retry with a fresh app; a pass on retry still warns on the run's page.
       - name: On-screen test
+        env:
+          UI_SMOKE_RETRIES: "1"
         run: xvfb-run -a -s "-screen 0 1280x800x24" node tools/build/ui-smoke.mjs ../MRLatte-build/electron/linux-unpacked/mrlatte ui-shots
 
       - uses: actions/upload-artifact@v4

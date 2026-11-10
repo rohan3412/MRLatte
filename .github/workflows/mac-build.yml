@@ -104,8 +104,27 @@ jobs:
       - name: Smoke test the app
         run: bash tools/build/mac-smoke-test.sh app
 
+      # Advisory on Intel: GitHub's Intel Macs have no GPU, and Chromium's
+      # software drawing there now and then freezes the page for minutes (10 Nov:
+      # one run passed every step, the next froze before dismissing the home
+      # screen). It still runs and uploads its screenshots; Apple Silicon (a
+      # real Mac GPU), Windows and Linux keep it strict, and the Intel build
+      # keeps its strict launch-and-quit test above. One retry with a fresh app
+      # (a pass on retry still warns). On Intel: Chromium's own software
+      # renderer (SwiftShader) and a smaller window, to see whether the freezes
+      # stop; a failure there shows as a warning on the run's page.
       - name: On-screen test
+        id: ui
+        continue-on-error: ${{ matrix.arch == 'x64' }}
+        env:
+          UI_SMOKE_RETRIES: "1"
+          UI_SMOKE_FLAGS: ${{ matrix.arch == 'x64' && '--use-angle=swiftshader --enable-unsafe-swiftshader' || '' }}
+          UI_SMOKE_SIZE: ${{ matrix.arch == 'x64' && '1024x700' || '1280x800' }}
         run: node tools/build/ui-smoke.mjs "$(ls -d ../MRLatte-build/electron/mac*/MRLatte.app | head -1)/Contents/MacOS/MRLatte" ui-shots
+
+      - name: Note an advisory on-screen failure
+        if: steps.ui.outcome == 'failure'
+        run: echo "::warning title=On-screen test failed (Intel Mac, advisory)::The on-screen test failed on the Intel Mac runner; the build carries on. Look at the ui-shots-mac-x64 artifact (zz- screenshots and the process samples) and this job's log."
 
       - uses: actions/upload-artifact@v4
         if: always()
