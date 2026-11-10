@@ -107,7 +107,7 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
 - **The View menu says "Multiplanar + 3D"**, the same as the command palette.
 - **Quit always finishes.** On an Intel Mac, Quit could leave the app open with its backend already
   stopped. MRLatte now closes its windows at once on Quit, and a backstop outside the app ends it if
-  it is still running 12 s later (macOS and Linux).
+  it is still running 6 s later (macOS and Linux).
 - **A plain right-click on the image no longer shows the window-drag readout** behind its menu. The
   readout appears once the pointer actually moves.
 - **The desktop app repaints after resizing and after the Ctrl key hints hide.** With the see-through

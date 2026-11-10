@@ -76,12 +76,18 @@ jobs:
 
       # upload-artifact only takes paths inside the workspace; the build output
       # sits beside the repo (package.json directories.output).
+      # With the AppImage: electron-builder's update file (an AppImage has no
+      # separate .blockmap).
       - name: Collect the AppImage
-        run: mkdir -p dist && cp ../MRLatte-build/electron/MRLatte-*-linux-*.AppImage dist/
+        run: |
+          mkdir -p dist
+          cp ../MRLatte-build/electron/MRLatte-*-linux-*.AppImage dist/
+          cp ../MRLatte-build/electron/latest-linux.yml dist/ 2>/dev/null || true
+          ls -l dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: MRLatte-linux-x64
-          path: dist/*.AppImage
+          path: dist/
           if-no-files-found: error
           retention-days: 14

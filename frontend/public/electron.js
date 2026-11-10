@@ -1595,19 +1595,21 @@ if (headerOnlyPath) {
     }
     // Backstop. Not unref'd: an unref'd timer is the one thing that may not
     // fire once nothing else keeps the main loop awake.
+    // The backend is stopped by now (stopServices), so a few seconds is plenty.
     setTimeout(() => {
-      console.warn("[electron] quit still pending after 8 s; exiting");
+      console.warn("[electron] quit still pending after 4 s; exiting");
       app.exit(0);
-    }, 8000);
-    // And one outside the app: on an Intel Mac runner the timer above never
-    // fired (the main thread was stuck in Electron's native shutdown), so a
-    // separate shell ends the app if it is still there 12 s after Quit.
+    }, 4000);
+    // And one outside the app: on the CI Macs the timer above never fires when
+    // the main thread is stuck in Electron's native shutdown (sometimes even
+    // after will-quit), so a separate shell ends the app if it is still there
+    // 6 s after Quit.
     if (!quitWatchdog && process.platform !== "win32") {
       quitWatchdog = true;
       try {
         // Only if that pid is still this program (Linux truncates names to 15).
         const name = path.basename(process.execPath).slice(0, 15).replace(/'/g, "");
-        spawn("/bin/sh", ["-c", `sleep 12; ps -p ${process.pid} -o comm= | grep -qF '${name}' && kill -9 ${process.pid}`], {
+        spawn("/bin/sh", ["-c", `sleep 6; ps -p ${process.pid} -o comm= | grep -qF '${name}' && kill -9 ${process.pid}`], {
           detached: true, stdio: "ignore",
         }).unref();
       } catch (_e) { /* best effort */ }

@@ -117,12 +117,19 @@ jobs:
 
       # upload-artifact only takes paths inside the workspace; the build output
       # sits beside the repo (package.json directories.output).
+      # With the disk image: its .blockmap and electron-builder's update file,
+      # renamed by architecture (each arch writes its own latest-mac.yml).
       - name: Collect the disk image
-        run: mkdir -p dist && cp ../MRLatte-build/electron/*.dmg dist/
+        run: |
+          mkdir -p dist
+          cp ../MRLatte-build/electron/*.dmg dist/
+          cp ../MRLatte-build/electron/*.dmg.blockmap dist/ 2>/dev/null || true
+          cp ../MRLatte-build/electron/latest-mac.yml dist/latest-mac-${{ matrix.arch }}.yml 2>/dev/null || true
+          ls -l dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: MRLatte-mac-${{ matrix.arch }}
-          path: dist/*.dmg
+          path: dist/
           if-no-files-found: error
           retention-days: 14

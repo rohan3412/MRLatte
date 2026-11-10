@@ -95,6 +95,8 @@ const targets = async () => {
 };
 const appPages = async () => (await targets()).filter((t) => t.type === "page" && /^http:\/\/127\.0\.0\.1:\d+\//.test(t.url));
 
+// Waits are generous: on the Intel Mac runner (software GL) the page answers
+// slowly, and 20 s was too short to dismiss the home screen there (10 Nov).
 async function until(what, fn, ms = 60000, every = 250) {
   const end = Date.now() + ms;
   let last;
@@ -127,7 +129,18 @@ async function shot(page, name, selector = '[data-testid="viewer-main"]') {
     return { lit: lit / n, levels: levels.size };
   })()`);
 }
-const drawn = (s, minLit = 0.03) => s && s.lit >= minLit && s.levels >= 12;
+// A brain on a black background: some of the view lit, not all of it (all of
+// it lit was a light overlay covering the viewer, 10 Nov).
+const drawn = (s, minLit = 0.03) => s && s.lit >= minLit && s.lit <= 0.9 && s.levels >= 12;
+// The home screen ("Open a scan") shows once the viewer is ready, which can
+// be after the first check: dismiss it again right before a viewer shot.
+async function noHomeScreen(page) {
+  await until("the home screen dismissed", async () => {
+    await click(page, "home-template");
+    return page.evaluate(`!document.querySelector('[data-testid="home-screen"]')`);
+  }, 90000, 500);
+  await sleep(800); // its fade
+}
 const click = (page, testId) => page.evaluate(`(() => { const b = document.querySelector('[data-testid="${testId}"]'); if (!b) return false; b.click(); return true; })()`);
 // Open a sidebar section (its row toggles; only click it when it is closed).
 const openSection = (page, id) => page.evaluate(`(() => { const t = document.querySelector('[data-testid="${id}-toggle"]'); if (!t) return false; if (t.getAttribute("aria-expanded") !== "true") t.click(); return true; })()`);
@@ -161,16 +174,17 @@ async function main() {
   await until("first-run screen handled", async () => {
     await click(page, "first-run-skip-all");
     return page.evaluate(`!document.querySelector('[data-testid="first-run"]')`);
-  }, 20000);
+  }, 90000);
   // A fresh install offers "Open a scan" over the viewer: keep the template.
   await until("the home screen handled", async () => {
     await click(page, "home-template");
     return page.evaluate(`!document.querySelector('[data-testid="home-screen"]')`);
-  }, 20000);
+  }, 90000);
   ok("window opened and the MNI152 template loaded");
 
   // 2. 2D, then 3D.
   await sleep(2500);
+  await noHomeScreen(page);
   const s2d = await shot(page, "01-2d-views");
   if (drawn(s2d)) ok(`2D views show the brain (${Math.round(s2d.lit * 100)}% lit, ${s2d.levels} grey levels)`);
   else fail(`2D views look blank: ${JSON.stringify(s2d)}`);
@@ -196,13 +210,13 @@ async function main() {
   ok("a mask opened from outside the app arrives as a layer in its own window");
 
   // 4. Draw on the axial slice and save it as a lesion.
-  await until("the Draw mask section", () => openSection(page2, "section-drawing"), 20000);
+  await until("the Draw mask section", () => openSection(page2, "section-drawing"), 90000);
   await until("drawing on", async () => {
     const label = await page2.evaluate(`document.querySelector('[data-testid="drawing-toggle"]')?.textContent || ""`);
     if (/active/.test(label)) return true;
     await click(page2, "drawing-toggle");
     return false;
-  }, 30000, 500);
+  }, 90000, 500);
   const box = await page2.evaluate(`(() => { const r = document.querySelector("#niivue-canvas").getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
   // The bottom-left tile of the multiplanar view is the axial slice.
   const cx = box.x + box.w * 0.25;
@@ -220,14 +234,14 @@ async function main() {
       await until("the saved drawing as a lesion", async () => {
         await openSection(page2, "section-lesion");
         return (await lesionCount(page2)) > lesionsBefore;
-      }, 30000, 500);
+      }, 90000, 500);
       ok("a drawing on the axial slice saves as a lesion");
     } catch (e) { fail(`saving the drawing: ${e.message}`); }
   }
 
   // 5. A quick report for the opened lesion.
   await openSection(page2, "section-report");
-  await until("the report panel", () => page2.evaluate(`!!document.querySelector('[data-testid="report-panel"]')`), 20000);
+  await until("the report panel", () => page2.evaluate(`!!document.querySelector('[data-testid="report-panel"]')`), 90000);
   await page2.evaluate(`(() => {
     const s = document.querySelector('[data-testid="report-lesion-select"]');
     if (!s || s.tagName !== "SELECT") return;
@@ -237,7 +251,7 @@ async function main() {
   if (!(await click(page2, "report-create"))) fail("no Create report button");
   else {
     try {
-      await until("the report", () => page2.evaluate(`!!document.querySelector('[data-testid="report-result"], [data-testid="report-open"]') || /Report ready/.test(document.body.innerText)`), 120000, 500);
+      await until("the report", () => page2.evaluate(`!!document.querySelector('[data-testid="report-result"], [data-testid="report-open"]') || /Report ready/.test(document.body.innerText)`), 240000, 500);
       await sleep(1000);
       await shot(page2, "05-report", "body");
       ok("a quick report for the opened lesion is made");
@@ -259,7 +273,7 @@ function stopApp() {
   } catch { /* already gone */ }
 }
 
-const watchdog = setTimeout(() => { fail("took longer than 12 minutes"); stopApp(); process.exit(1); }, 12 * 60 * 1000);
+const watchdog = setTimeout(() => { fail("took longer than 20 minutes"); stopApp(); process.exit(1); }, 20 * 60 * 1000);
 try {
   await main();
 } catch (e) {

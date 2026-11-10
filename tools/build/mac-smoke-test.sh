@@ -169,9 +169,15 @@ app)
   QUIT_HOW="osascript"
   osascript -e 'quit app "MRLatte"' 2>/tmp/mrlatte-osascript.log || { QUIT_HOW="SIGTERM (osascript failed)"; kill -TERM "$APID"; }
   QUIT_SECS=0
+  rm -f /tmp/mrlatte-quit-sample.txt
   for _ in $(seq 1 20); do
     kill -0 "$APID" 2>/dev/null || break
     sleep 1; QUIT_SECS=$((QUIT_SECS + 1))
+    # Still there after 3 s: record where its main thread is (native stack),
+    # while it is still stuck, before a backstop ends it.
+    if [ "$QUIT_SECS" = 3 ] && kill -0 "$APID" 2>/dev/null; then
+      sample "$APID" 2 > /tmp/mrlatte-quit-sample.txt 2>/dev/null || true
+    fi
   done
   if kill -0 "$APID" 2>/dev/null; then
     # Where the main thread is stuck (native stack), before anything else.
@@ -183,11 +189,14 @@ app)
     echo "--- remaining MRLatte processes:"; ps -axo pid,ppid,stat,etime,command | grep -i "[M]RLatte" || true
     fail "the app did not quit"
   fi
-  # A quit past ~8 s means a backstop ended it (electron.js before-quit), not
-  # a clean shutdown: passes, but says so, with the app's own lines.
-  if [ "$QUIT_SECS" -ge 8 ]; then
+  # A quit past ~3 s means it hung in shutdown and a backstop (electron.js
+  # before-quit: 4 s inside, 6 s outside) ended it: passes, but says so, with
+  # the app's own lines and where its main thread was stuck.
+  if [ "$QUIT_SECS" -ge 3 ]; then
     echo "--- note: quit took ${QUIT_SECS} s (a backstop ended it); app output:"
     grep "^\[electron\]" /tmp/mrlatte-app.log 2>/dev/null || true
+    echo "--- main thread while stuck (sample at 3 s):"
+    sed -n '/Call graph:/,/Total number in stack/p' /tmp/mrlatte-quit-sample.txt 2>/dev/null | head -n 60 || true
   fi
   sleep 2
   if pgrep -fl "Contents/Resources/python/bin/python3.11"; then

@@ -90,13 +90,20 @@ jobs:
 
       # upload-artifact only takes paths inside the workspace; the build output
       # sits beside the repo (package.json directories.output).
+      # With the installer: its .blockmap and latest.yml (electron-builder's
+      # update files), so a release can carry the full set.
       - name: Collect the installer
         shell: bash
-        run: mkdir -p dist && cp ../MRLatte-build/electron/MRLatte-Setup-*-mini-x64.exe dist/
+        run: |
+          mkdir -p dist
+          cp ../MRLatte-build/electron/MRLatte-Setup-*-mini-x64.exe dist/
+          cp ../MRLatte-build/electron/MRLatte-Setup-*-mini-x64.exe.blockmap dist/ 2>/dev/null || true
+          cp ../MRLatte-build/electron/latest.yml dist/ 2>/dev/null || true
+          ls -l dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: MRLatte-win-x64-minimal
-          path: dist/*.exe
+          path: dist/
           if-no-files-found: error
           retention-days: 14
