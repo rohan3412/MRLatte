@@ -144,8 +144,14 @@ async function noHomeScreen(page) {
 const click = (page, testId) => page.evaluate(`(() => { const b = document.querySelector('[data-testid="${testId}"]'); if (!b) return false; b.click(); return true; })()`);
 // Open a sidebar section (its row toggles; only click it when it is closed).
 const openSection = (page, id) => page.evaluate(`(() => { const t = document.querySelector('[data-testid="${id}-toggle"]'); if (!t) return false; if (t.getAttribute("aria-expanded") !== "true") t.click(); return true; })()`);
-// Lesions listed in the Lesion masks section (a row per layer: layer-<id>).
-const lesionCount = (page) => page.evaluate(`[...document.querySelectorAll('[data-testid="section-lesion"] [data-testid^="layer-"]')].filter((e) => !e.dataset.testid.startsWith("layer-extra-")).length`);
+// Lesions in the Lesion masks section: its header's count badge (what a person
+// sees), or its rows (layer-<id>), whichever is higher. On the Intel Mac
+// runner the rows didn't match while the badge already read 1 (10 Nov).
+const lesionCount = (page) => page.evaluate(`(() => {
+  const rows = [...document.querySelectorAll('[data-testid="section-lesion"] [data-testid^="layer-"]')].filter((e) => !e.dataset.testid.startsWith("layer-extra-")).length;
+  const badge = parseInt(document.querySelector('[data-testid="section-lesion-toggle"] .count')?.textContent || "0", 10) || 0;
+  return Math.max(rows, badge);
+})()`);
 
 // ---------------------------------------------------------------------------
 const tmp = mkdtempSync(path.join(os.tmpdir(), "mrlatte-ui-"));

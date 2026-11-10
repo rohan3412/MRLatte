@@ -189,10 +189,10 @@ app)
     echo "--- remaining MRLatte processes:"; ps -axo pid,ppid,stat,etime,command | grep -i "[M]RLatte" || true
     fail "the app did not quit"
   fi
-  # A quit past ~3 s means it hung in shutdown and a backstop (electron.js
+  # A quit of 4 s or more means it hung in shutdown and a backstop (electron.js
   # before-quit: 4 s inside, 6 s outside) ended it: passes, but says so, with
   # the app's own lines and where its main thread was stuck.
-  if [ "$QUIT_SECS" -ge 3 ]; then
+  if [ "$QUIT_SECS" -ge 4 ]; then
     echo "--- note: quit took ${QUIT_SECS} s (a backstop ended it); app output:"
     grep "^\[electron\]" /tmp/mrlatte-app.log 2>/dev/null || true
     echo "--- main thread while stuck (sample at 3 s):"
