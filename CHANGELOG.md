@@ -95,6 +95,14 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
 - **Longitudinal comparison always aligns the follow-up to the baseline**, also when both scans
   share a voxel grid (the head may have moved between sessions). It moves and turns the scan
   (rigid registration) and never stretches it, so real change such as lesion growth stays visible.
+- **Fixed: a force-quit MRLatte left its analysis engine running.** After Task Manager's End task,
+  Activity Monitor's Force Quit or a crash, the backend kept running in the background (holding
+  memory and port 8001; the next start ran a second one). It now notices that the app is gone and
+  stops by itself, analysis workers included. The build checks this on all three platforms.
+- **Computers without graphics acceleration** (a virtual machine, a remote-desktop session, Linux
+  without GPU drivers): MRLatte notices, says so once, keeps the animations off and draws the 3D
+  view with fewer samples. Drawing in software, each 3D frame took seconds, and an animation queued
+  dozens of them, so the window stopped answering.
 - **Fixed: a report could name the wrong hemisphere.** For a mask stored left-to-right flipped
   (as FSL writes MNI masks) on a grid other than the template's, the report made without LQTpy put
   the lesion in the other hemisphere, gave its voxel position as its MNI centre, and listed the

@@ -1,4 +1,5 @@
 import { getPref } from "@/lib/preferences";
+import { softwareGL } from "@/lib/viewer/softwareGL";
 
 /**
  * Brief visual effects over the viewer (owner's "delight" list, 5 Nov; each is
@@ -18,7 +19,8 @@ import { getPref } from "@/lib/preferences";
  *                        on the canvas, so it costs no texture work at all
  *
  * All of them do nothing when Preferences ▸ Visual effects is off (what the
- * coming performance mode switches) or the OS asks for reduced motion, and
+ * coming performance mode switches), the OS asks for reduced motion, or the
+ * window draws without a GPU (softwareGL.js: each frame costs seconds), and
  * every one ends exactly where the plain action would have: they only change
  * how the app gets there.
  *
@@ -28,7 +30,7 @@ import { getPref } from "@/lib/preferences";
  * screenSlices swap below, restored synchronously) gives every tile's position.
  */
 export function effectsOn() {
-  if (!getPref("visualEffects") || getPref("performanceMode")) return false;
+  if (!getPref("visualEffects") || getPref("performanceMode") || softwareGL()) return false;
   try {
     return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   } catch (_e) {

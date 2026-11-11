@@ -591,6 +591,9 @@ async function startBackend(port, onStatus) {
     // dcm2niix on PATH so the backend's shutil.which("dcm2niix") resolves.
     PATH: path.join(res, "dcm2niix") + path.delimiter + (process.env.PATH || ""),
     PYTHONUNBUFFERED: "1",
+    // The backend stops itself if this process is force-quit or crashes
+    // (backend/parent_watch.py); a normal quit stops it in stopServices.
+    MRLATTE_PARENT_PID: String(process.pid),
   });
   delete env.CORS_ORIGINS; // same-origin (localhost:8001) — no CORS needed
 

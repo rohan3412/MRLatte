@@ -87,6 +87,31 @@ app)
     fail "bundled python still running after the app quit"
   fi
   pass "quit in ${QUIT_SECS} s ($QUIT_HOW), no backend left running"
+
+  # A force-quit (a crash, kill -9) skips the app's own shutdown: its backend
+  # must notice and stop by itself, workers included (parent_watch.py). Only
+  # the app's main process is killed here.
+  MRLATTE_USER_DATA_DIR="$PROFILE" "$EXE" --no-sandbox > /tmp/mrlatte-app2.log 2>&1 &
+  APID2=$!
+  for _ in $(seq 1 180); do
+    pgrep -f "resources/python/bin/python3.11" >/dev/null && break
+    sleep 1
+  done
+  pgrep -f "resources/python/bin/python3.11" >/dev/null || { kill -9 "$APID2" 2>/dev/null || true; fail "the relaunched app started no backend"; }
+  sleep 5
+  kill -9 "$APID2"
+  GONE_SECS=0
+  for _ in $(seq 1 15); do
+    pgrep -f "resources/python/bin/python3.11" >/dev/null || break
+    sleep 1; GONE_SECS=$((GONE_SECS + 1))
+  done
+  if pgrep -f "resources/python/bin/python3.11" >/dev/null; then
+    pgrep -fa "resources/python/bin/python3.11"
+    tail -n 20 "$LOG_DIR/backend.log" 2>/dev/null || true
+    pkill -9 -f "resources/python/bin/python3.11" || true
+    fail "after a force-quit the backend kept running"
+  fi
+  pass "after a force-quit the backend stopped by itself (${GONE_SECS} s)"
   ;;
 
 *)

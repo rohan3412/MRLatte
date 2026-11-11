@@ -212,6 +212,26 @@ app)
   LEFT="$(bundled_pythons win-unpacked)"
   if [ -n "$LEFT" ]; then show_logs; force_kill_app; fail "bundled python still running after the app quit (pid $LEFT)"; fi
   pass "quit cleanly, no backend left running"
+
+  # A force-quit (Task Manager's End task, a crash) skips the app's own
+  # shutdown: its backend must notice and stop by itself (parent_watch.py).
+  # Only the app's processes are killed here, never the python.
+  LOCALAPPDATA="$(win "$TMPD/local")" MRLATTE_USER_DATA_DIR="$(win "$TMPD/user")" "$EXE" > "$TMPD/app2.log" 2>&1 &
+  for _ in $(seq 1 180); do
+    [ -n "$(bundled_pythons win-unpacked)" ] && [ -n "$(bundled_backend_port win-unpacked)" ] && break
+    sleep 1
+  done
+  [ -n "$(bundled_pythons win-unpacked)" ] || { show_logs; force_kill_app; fail "the relaunched app started no backend"; }
+  sleep 3
+  powershell -NoProfile -Command "Get-Process MRLatte -ErrorAction SilentlyContinue | Where-Object { \$_.Path -like '*win-unpacked*' } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0" >/dev/null 2>&1 || true
+  GONE_SECS=0
+  for _ in $(seq 1 15); do
+    [ -z "$(bundled_pythons win-unpacked)" ] && break
+    sleep 1; GONE_SECS=$((GONE_SECS + 1))
+  done
+  LEFT="$(bundled_pythons win-unpacked)"
+  if [ -n "$LEFT" ]; then show_logs; force_kill_app; fail "after a force-quit the backend kept running (pid $LEFT)"; fi
+  pass "after a force-quit the backend stopped by itself (${GONE_SECS} s)"
   ;;
 
 *)

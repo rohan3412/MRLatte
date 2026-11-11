@@ -25,6 +25,7 @@ import { createVolumeApi } from "@/lib/viewer/volumeApi";
 import { createFrameApi } from "@/lib/viewer/frameApi";
 import { createScreenshotApi } from "@/lib/viewer/screenshot";
 import { createQualityController, LEVELS } from "@/lib/viewer/interactiveQuality";
+import { noteRenderer, softwareGL, SOFTWARE_STEP_SCALE } from "@/lib/viewer/softwareGL";
 import { createSegmentationApi } from "@/lib/viewer/segmentation";
 import { createDrawingApi } from "@/lib/viewer/drawingApi";
 import { createPointerMath } from "@/lib/viewer/pointerMath";
@@ -826,6 +827,25 @@ const NiivueViewer = forwardRef(function NiivueViewer(
     // and takes the whole NiivueViewer component down with it.
     installCustomRenderShader(nv);
     installSliceBackgroundShader(nv);
+
+    // No GPU (lib/viewer/softwareGL.js): the 3D view draws with coarser steps,
+    // also when still, and the animated effects stay off; said once.
+    const gpu = noteRenderer(nv.gl);
+    if (gpu.software) {
+      console.info("[viewer] software renderer:", gpu.name);
+      try {
+        const sh = nv.renderShader;
+        if (sh?.program && sh.uniforms?.stepScale != null) {
+          nv.gl.useProgram(sh.program);
+          nv.gl.uniform1f(sh.uniforms.stepScale, SOFTWARE_STEP_SCALE);
+        }
+      } catch (_e) { /* full quality, slower */ }
+      toast.info("No graphics acceleration", {
+        id: "software-gl",
+        description: "This computer draws the viewer without a GPU, so MRLatte keeps animations off and draws the 3D view at lower quality.",
+        duration: 10000,
+      });
+    }
 
     // Let the GPU finish each layer rebuild before the next one is queued.
     // updateGLVolume rebuilds every layer's 3D texture (an 11M-voxel upload
@@ -1944,9 +1964,11 @@ const NiivueViewer = forwardRef(function NiivueViewer(
       setPreviewBadge(next);
     };
     // Canvas size only changes when the 3D view fills the canvas.
+    // Still frames: full sampling, or coarser without a GPU (softwareGL.js).
+    const baseStep = () => (softwareGL() ? SOFTWARE_STEP_SCALE : 1);
     const applyLevel = (lv) => {
       const q = LEVELS[lv] || LEVELS[0];
-      setStepScale(q.stepScale);
+      setStepScale(Math.max(q.stepScale, baseStep()));
       tractRenderStateRef.current.lodFraction = q.tractFraction;
       const nv = nvRef.current;
       const only3D = sliceTypeRef.current === "render" && !(nv?.customLayout?.length > 1);
@@ -1998,7 +2020,7 @@ const NiivueViewer = forwardRef(function NiivueViewer(
       coalesced = null;
       replacedDraw = null;
       ctl.end();
-      setStepScale(1);
+      setStepScale(baseStep());
       tractRenderStateRef.current.lodFraction = 1;
       updateBadge();
       if (!nv) return;

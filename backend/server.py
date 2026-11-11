@@ -43,6 +43,15 @@ warnings.filterwarnings(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # The installed app passes its process id: the backend stops itself if the
+    # app is force-quit or crashes (parent_watch). Nothing without the variable.
+    try:
+        import parent_watch
+        if parent_watch.start_from_env():
+            logging.getLogger(__name__).info("watching the app process %s", os.environ.get("MRLATTE_PARENT_PID"))
+    except Exception as exc:  # noqa: BLE001 — never fail startup on this
+        logging.getLogger(__name__).warning("app watch not started: %s", exc)
+
     # Prune stale dissection results on real server startup only. This used to
     # run as an import side effect in deps.py, which meant any `import server`
     # — a test, a lint, an editor's autocomplete — permanently deleted every
