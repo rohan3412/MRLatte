@@ -35,6 +35,22 @@ const zlib = require("zlib");
 const { spawn, execFile } = require("child_process");
 const { parseMrlatteDeepLink, ALLOWED_EXT_RE } = require("./deepLinkParser");
 
+// An Intel Mac without graphics acceleration (a virtual machine; GitHub's
+// Intel Mac runners): Chromium runs WebGL through ANGLE's OpenGL backend into
+// Apple's software renderer, and the viewer freezes the window for minutes,
+// even in its no-GPU mode (stack samples, 11 Nov). Asking for Metal there
+// makes Chromium fall back to SwiftShader, its own software renderer, which
+// keeps the window usable (the full on-screen test passed, 11 Nov). The
+// renderer is fixed once the GPU process starts, so the first launch on such
+// a Mac checks it before anything else, leaves this mark in userData and
+// restarts once (restartIfSoftwareGLOnMac); later launches ask for Metal from
+// the start. Where Metal does work, asking for it changes nothing.
+const SOFTWARE_GL_MARK = "software-webgl";
+const softwareGLMarked = process.platform === "darwin" && (() => {
+  try { return fs.existsSync(path.join(app.getPath("userData"), SOFTWARE_GL_MARK)); } catch { return false; }
+})();
+if (softwareGLMarked) app.commandLine.appendSwitch("use-angle", "metal");
+
 const BACKEND_PORT = 8001;
 const APP_URL = `http://127.0.0.1:${BACKEND_PORT}/`;
 const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/api/`;
@@ -1497,7 +1513,32 @@ if (headerOnlyPath) {
     }, 3000);
   }
 
+  // See SOFTWARE_GL_MARK. True when this launch is being replaced by a restart.
+  // Apple Silicon always has Metal (an Intel build there runs under Rosetta on
+  // the same GPU), and a renderer chosen by hand (--use-angle) is left alone.
+  async function restartIfSoftwareGLOnMac() {
+    if (process.platform !== "darwin" || process.arch !== "x64" || app.runningUnderARM64Translation) return false;
+    if (softwareGLMarked || app.commandLine.hasSwitch("use-angle")) return false;
+    const t0 = Date.now();
+    let info = null;
+    try {
+      info = await Promise.race([app.getGPUInfo("complete"), new Promise((r) => setTimeout(() => r(null), 4000))]);
+    } catch { /* unknown: carry on as is */ }
+    const renderer = String(info?.auxAttributes?.glRenderer || "unknown");
+    console.log(`[electron] WebGL renderer at start: ${renderer} (${Date.now() - t0} ms)`);
+    if (!/apple software renderer/i.test(JSON.stringify(info || {}))) return false;
+    // Without the mark every launch would restart: then don't.
+    try { fs.writeFileSync(path.join(app.getPath("userData"), SOFTWARE_GL_MARK), `${renderer}\n`); } catch { return false; }
+    // Files Finder handed over before ready go along on the new argv (the cold
+    // start opens the first; a mrlatte:// link that started this launch is lost).
+    console.log("[electron] Apple's software renderer: restarting with Metal requested (SwiftShader)");
+    app.relaunch({ args: [...process.argv.slice(1), ...earlyOpenFiles] });
+    app.exit(0);
+    return true;
+  }
+
   app.whenReady().then(async () => {
+    if (await restartIfSoftwareGLOnMac()) return;
     // A file MRLatte can't open fails here, before the loading page, saying why.
     const refused = await refusedOpenFromArgv(process.argv);
     if (refused) {

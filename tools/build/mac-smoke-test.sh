@@ -164,6 +164,12 @@ app)
     fail "the packaged app's own backend did not answer within 180 s"
   fi
   pass "packaged app started its own backend (port $APP_PORT)"
+  # A Mac without a GPU restarts the app once at its first start (electron.js,
+  # restartIfSoftwareGLOnMac), so follow the app's main process by its path
+  # from here on, not the one started above.
+  grep -h "WebGL renderer at start\|restarting with Metal" /tmp/mrlatte-app.log 2>/dev/null | sed 's/^/  info  /' || true
+  APID="$(pgrep -f "$APP/Contents/MacOS/MRLatte( |\$)" | head -1)"
+  [ -n "$APID" ] || fail "no MRLatte main process found for $APP"
 
   # Quit as a user would; fall back to SIGTERM if Apple Events are not allowed.
   QUIT_HOW="osascript"
