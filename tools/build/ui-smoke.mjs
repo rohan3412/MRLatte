@@ -208,6 +208,16 @@ async function main() {
     return page.evaluate(`!document.querySelector('[data-testid="home-screen"]')`);
   }, 90000);
   ok("window opened and the MNI152 template loaded");
+  // Which WebGL renderer this machine gave the viewer (the same test as
+  // frontend/src/lib/viewer/softwareGL.js), so a slow run can be read.
+  const gl = await page.evaluate(`(() => {
+    const c = document.querySelector("#niivue-canvas"); const gl = c && c.getContext("webgl2");
+    if (!gl) return "no WebGL 2";
+    const e = gl.getExtension("WEBGL_debug_renderer_info");
+    return String(gl.getParameter(e ? e.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  })()`);
+  const sw = /swiftshader|llvmpipe|softpipe|software rasterizer|software renderer|basic render driver|gdi generic/i.test(gl);
+  console.log(`  info  WebGL renderer: ${gl}${sw ? " (software: the viewer runs in its no-GPU mode)" : ""}`);
 
   // 2. 2D, then 3D.
   await sleep(2500);

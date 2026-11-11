@@ -126,6 +126,19 @@ jobs:
         if: steps.ui.outcome == 'failure'
         run: echo "::warning title=On-screen test failed (Intel Mac, advisory)::The on-screen test failed on the Intel Mac runner; the build carries on. Look at the ui-shots-mac-x64 artifact (zz- screenshots and the process samples) and this job's log."
 
+      # Diagnostic, Intel only: there WebGL goes through ANGLE's OpenGL backend
+      # into Apple's software renderer (sampled 11 Nov), while the runner's
+      # virtual GPU does run Metal. Does the same test pass with Metal WebGL?
+      # The answer decides whether the app should ask for it on such machines.
+      - name: On-screen test with Metal WebGL (diagnostic)
+        if: matrix.arch == 'x64'
+        continue-on-error: true
+        env:
+          UI_SMOKE_RETRIES: "0"
+          UI_SMOKE_SIZE: 1024x700
+          UI_SMOKE_FLAGS: --use-angle=metal
+        run: node tools/build/ui-smoke.mjs "$(ls -d ../MRLatte-build/electron/mac*/MRLatte.app | head -1)/Contents/MacOS/MRLatte" ui-shots/metal
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
