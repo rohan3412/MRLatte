@@ -104,20 +104,16 @@ jobs:
       - name: Smoke test the app
         run: bash tools/build/mac-smoke-test.sh app
 
-      # Advisory on Intel: GitHub's Intel Macs have no GPU. There Chromium runs
-      # WebGL through ANGLE's OpenGL backend into Apple's software renderer,
-      # which freezes the page for minutes even in the viewer's no-GPU mode
-      # (11 Nov: stack samples, and the renderer name the test prints). The
-      # app now notices that at its first start and restarts once asking for
-      # Metal, which there falls back to SwiftShader (electron.js,
-      # restartIfSoftwareGLOnMac); this test runs with the app's own choice,
-      # so the Intel run checks that restart too. SwiftShader with the no-GPU
-      # mode passed every step (11 Nov). Apple Silicon (a real Mac GPU, Metal
-      # by default), Windows and Linux keep it strict, and the Intel build
-      # keeps its strict launch-and-quit test above. One retry with a fresh app
-      # (a pass on retry still warns); a failure on Intel shows as a warning on
-      # the run's page, with stack samples of the stuck processes in the
-      # artifact.
+      # Advisory on Intel: GitHub's Intel Macs have no GPU, so Chromium draws
+      # with SwiftShader, its own software renderer, and the viewer runs in its
+      # no-GPU mode (passed every step, 11 Nov). With Chromium's GPU blocklist
+      # switched off (the test used to) WebGL went to Apple's software renderer
+      # instead, which froze the page for minutes; users never get that, so
+      # the test no longer does on macOS. Apple Silicon (a real Mac GPU, Metal),
+      # Windows and Linux keep it strict, and the Intel build keeps its strict
+      # launch-and-quit test above. One retry with a fresh app (a pass on retry
+      # still warns); a failure on Intel shows as a warning on the run's page,
+      # with stack samples of the stuck processes in the artifact.
       - name: On-screen test
         id: ui
         continue-on-error: ${{ matrix.arch == 'x64' }}

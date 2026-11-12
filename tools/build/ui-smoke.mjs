@@ -181,8 +181,11 @@ function startApp() {
   maskFile = path.join(tmp, "ui-smoke-lesion.nii");
   writeMask(maskFile);
   // Software GL on CI runners: Chromium may refuse WebGL on a blocklisted GPU.
+  // Not on macOS: there the blocklist is what keeps a Mac without a GPU off
+  // Apple's software renderer (which froze the page for minutes) and on
+  // SwiftShader, as for every user (Intel runner, 11 Nov).
   // Linux: the unpacked app's chrome-sandbox isn't setuid outside an install.
-  const flags = [`--remote-debugging-port=${PORT}`, "--ignore-gpu-blocklist", ...EXTRA_FLAGS];
+  const flags = [`--remote-debugging-port=${PORT}`, ...(process.platform === "darwin" ? [] : ["--ignore-gpu-blocklist"]), ...EXTRA_FLAGS];
   if (process.platform === "linux") flags.push("--no-sandbox");
   app = spawn(exe, flags, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   appLog = "";
@@ -218,7 +221,6 @@ async function main() {
   })()`);
   const sw = /swiftshader|llvmpipe|softpipe|software rasterizer|software renderer|basic render driver|gdi generic/i.test(gl);
   console.log(`  info  WebGL renderer: ${gl}${sw ? " (software: the viewer runs in its no-GPU mode)" : ""}`);
-  for (const l of appLog.split("\n")) if (/WebGL renderer at start|restarting with Metal/.test(l)) console.log(`  info  ${l.trim()}`);
 
   // 2. 2D, then 3D.
   await sleep(2500);
@@ -309,24 +311,6 @@ function stopApp() {
     if (process.platform === "win32") execFileSync("taskkill", ["/PID", String(app.pid), "/T", "/F"], { stdio: "ignore" });
     else process.kill(-app.pid, "SIGKILL");
   } catch { /* already gone */ }
-  // A Mac without a GPU restarts the app once at its first start (electron.js,
-  // restartIfSoftwareGLOnMac): that instance is not the process started here.
-  if (process.platform === "darwin") {
-    for (const l of macAppProcesses()) {
-      try { process.kill(Number(l.trim().split(/\s+/)[0]), "SIGKILL"); } catch { /* already gone */ }
-    }
-  }
-}
-
-// macOS: the app's processes, as `ps` lines (pid, %cpu, elapsed, command).
-// The helpers (renderer, GPU) run by their full path, so match on that; the
-// main process shows the path it was started with (maybe relative). This
-// test itself is left out (its command line names the app too).
-function macAppProcesses() {
-  let ps = "";
-  try { ps = execFileSync("ps", ["-axo", "pid=,pcpu=,etime=,command="], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }); } catch { return []; }
-  const dirs = [path.resolve(exe), exe].map((p) => p.split("/Contents/")[0]);
-  return ps.split("\n").filter((l) => dirs.some((d) => l.includes(d)) && !/\bnode\b.*ui-smoke/.test(l));
 }
 
 // Where each of the app's processes is right now, saved into the shots folder
@@ -339,9 +323,14 @@ function sampleProcesses(tag) {
     try { return execFileSync(cmd, args, { encoding: "utf8", timeout: ms, maxBuffer: 32 * 1024 * 1024 }); }
     catch (e) { return String(e.stdout || e.message || ""); }
   };
+  // The helpers (renderer, GPU) run by their full path, so match on that, and
+  // leave out this test itself (its command line names the app too).
   const notMe = (l) => !/\bnode\b.*ui-smoke/.test(l);
   if (process.platform === "darwin") {
-    const mine = macAppProcesses();
+    // The main process shows the path it was started with (maybe relative).
+    const dirs = [path.resolve(exe), exe].map((p) => p.split("/Contents/")[0]);
+    const ps = run("ps", ["-axo", "pid=,pcpu=,etime=,command="]);
+    const mine = ps.split("\n").filter((l) => dirs.some((d) => l.includes(d)) && notMe(l));
     out.push("processes (pid, %cpu, elapsed, command):", ...mine.map((l) => "  " + l.trim().slice(0, 220)));
     for (const l of mine) {
       const pid = l.trim().split(/\s+/)[0];

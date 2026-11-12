@@ -102,9 +102,7 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
 - **Computers without graphics acceleration** (a virtual machine, a remote-desktop session, Linux
   without GPU drivers): MRLatte notices, says so once, keeps the animations off and draws the 3D
   view with fewer samples. Drawing in software, each 3D frame took seconds, and an animation queued
-  dozens of them, so the window stopped answering. On such an Intel Mac, Apple's own software
-  renderer froze the window even so; there MRLatte restarts once at its first start, about a second,
-  to use Chromium's faster one, and starts that way from then on.
+  dozens of them, so the window stopped answering.
 - **Fixed: a report could name the wrong hemisphere.** For a mask stored left-to-right flipped
   (as FSL writes MNI masks) on a grid other than the template's, the report made without LQTpy put
   the lesion in the other hemisphere, gave its voxel position as its MNI centre, and listed the
