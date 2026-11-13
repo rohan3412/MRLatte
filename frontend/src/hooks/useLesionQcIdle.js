@@ -92,14 +92,16 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
     setIdleWarning(result);
   };
 
-  const runLive = async () => {
+  // In a ref: it reads only refs and a state setter, so one copy serves every
+  // render (the stable draw-change closure below and the effect use it).
+  const runLiveRef = useRef(async () => {
     if (!activeRef.current) return;
     const seq = ++liveSeqRef.current;
     if (!sessionRef.current) sessionRef.current = `drawing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const result = await runLiveQc({ viewerRef, session: sessionRef.current, mni: mniRef.current });
     if (seq !== liveSeqRef.current || !activeRef.current) return; // a newer stroke, or paint mode off
     setLive(result);   // null: an empty drawing, or nothing to say right now
-  };
+  });
 
   // Stable across renders (initialised once) — see the function doc above
   // for why this must never be recreated. Any drawing change retires the
@@ -112,7 +114,7 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
     // change, so a change there applies to the next pause.
     if (!getPref("idleQc")) { setLive(null); return; }
     if (liveOkRef.current) {
-      timerRef.current = setTimeout(runLive, LIVE_DEBOUNCE_MS);
+      timerRef.current = setTimeout(runLiveRef.current, LIVE_DEBOUNCE_MS);
       return;
     }
     timerRef.current = setTimeout(runIdleCheck, getPref("idleQcSeconds") * 1000);
@@ -128,7 +130,7 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
         if (gone) return;
         liveOkRef.current = hasFeature(caps, "qc.session");
         // A drawing that is already there gets its badge at once.
-        if (liveOkRef.current && getPref("idleQc")) runLive();
+        if (liveOkRef.current && getPref("idleQc")) runLiveRef.current();
       }).catch(() => { liveOkRef.current = false; });
       return () => { gone = true; };
     }
