@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld("mrlatte", {
   // Sidebar open/closed, so main can lower the window's minimum width while
   // the sidebar is hidden. Boolean only — main owns the actual sizes.
   setSidebarOpen: (open) => ipcRenderer.send("mrlatte:setSidebarOpen", open === true),
+  // The viewer is ready: the first window grows from the small loading size.
+  appReady: () => ipcRenderer.send("mrlatte:appReady"),
   // Native menu bar. A menu click arrives as a command id only (never the
   // IPC event); the returned function removes exactly this listener.
   onMenuCommand: (cb) => {
@@ -87,10 +89,6 @@ contextBridge.exposeInMainWorld("mrlatte", {
     const n = Number(f);
     if (Number.isFinite(n) && n >= 0.8 && n <= 1.5) webFrame.setZoomFactor(n);
   },
-  // Preferences ▸ Transparency: the OS material behind the page, on or off.
-  setWindowMaterial: (on) => ipcRenderer.send("mrlatte:setWindowMaterial", !!on),
-  // A full repaint of the window (see "mrlatte:repaint" in electron.js).
-  repaint: () => ipcRenderer.send("mrlatte:repaint"),
   setAppearance: (mode) => {
     if (APPEARANCES.includes(mode)) ipcRenderer.send("mrlatte:setAppearance", mode);
   },

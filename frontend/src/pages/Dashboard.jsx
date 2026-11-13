@@ -30,7 +30,12 @@ import { PolarAngleDisc, EccentricityBar, polarAngleDiscToDataURL } from "@/comp
 import { SidebarSection, SidebarGroup, SidebarSectionsContext, useSidebarSectionsController } from "@/components/SidebarSection";
 import { CrosshairInfo } from "@/components/CrosshairInfo";
 import { DrawingPanel } from "@/components/DrawingPanel";
-import { LesionQcDialog } from "@/components/LesionQcDialog";
+import { LesionQcDialog, SHOW_PLANE_EVENT } from "@/components/LesionQcDialog";
+import { FixPreviewBar, previewFindingFix } from "@/components/FixPreviewBar";
+import { cancelFixPreview, cancelFixPreviewIfDrawingChanged } from "@/lib/fixPreview";
+import { useLqtpyFeature } from "@/hooks/useLqtpyFeature";
+import { viewerDrawingStats } from "@/lib/drawingStats";
+import { crowdingRef } from "@/lib/toolbarCrowding";
 import { PreferencesDialog } from "@/components/PreferencesDialog";
 import { FirstRun } from "@/components/FirstRun";
 import { HomeScreen } from "@/components/HomeScreen";
@@ -243,6 +248,12 @@ export default function Dashboard() {
   const bensonVfMap2dRef = useRef(null);
   const wmVfMap2dRef = useRef(null);
   const [viewerReady, setViewerReady] = useState(false);
+  // The toolbar docked as a vertical strip goes to two columns when its tools
+  // don't fit (lib/toolbarCrowding.js). One ref callback for the app's life.
+  const toolbarCrowdingRef = useRef(crowdingRef()).current;
+  // Desktop app: the first window opened small for the loading screen; it
+  // grows to full size now (electron.js growToFull).
+  useEffect(() => { if (viewerReady) window.mrlatte?.appReady?.(); }, [viewerReady]);
   // Panel chrome: collapsing hides the sidebar/topbar visually (width/height
   // squeezed to 0 via CSS) but keeps their contents mounted, so section
   // open/closed state and in-progress panel inputs (measurements, drawing,
@@ -655,9 +666,33 @@ export default function Dashboard() {
     }
     setHeaderTarget({ name: layer.fullPath || layer.name, hdr: vol.hdr });
   }, []);
-  const { notifyDrawChange: notifyLesionQcDrawChange, idleWarning: qcIdleWarning } = useLesionQcIdle({
+  const { notifyDrawChange: notifyLesionQcDrawChange, idleWarning: qcIdleWarning, live: qcLive } = useLesionQcIdle({
     viewerRef, active: drawingActive, mni: lesionQcMni,
   });
+  // lqtpy 0.8.0+: quality notes offer "Preview fix" (FixPreviewBar).
+  const fixPlanOk = useLqtpyFeature("qc.fix_plan", drawingActive);
+  // A preview describes the drawing as it was: drop it when drawing stops.
+  useEffect(() => { if (!drawingActive) cancelFixPreview(); }, [drawingActive]);
+  // Live lesion stats while drawing (lib/drawingStats.js), worked out shortly
+  // after each change; `scheduleDrawStats` is stable for the draw-change
+  // handler below (empty deps), so it reads the switches through a ref.
+  const [liveStatsOn] = usePreference("liveLesionStats");
+  const [drawStats, setDrawStats] = useState(null);
+  const drawStatsTimerRef = useRef(null);
+  const liveStatsActiveRef = useRef(false);
+  liveStatsActiveRef.current = drawingActive && liveStatsOn;
+  const scheduleDrawStats = useRef(() => {
+    clearTimeout(drawStatsTimerRef.current);
+    if (!liveStatsActiveRef.current) return;
+    drawStatsTimerRef.current = setTimeout(() => {
+      setDrawStats(liveStatsActiveRef.current ? viewerDrawingStats(viewerRef.current?.getNiivue?.()) : null);
+    }, 150);
+  }).current;
+  useEffect(() => {
+    if (drawingActive && liveStatsOn) scheduleDrawStats();
+    else { clearTimeout(drawStatsTimerRef.current); setDrawStats(null); }
+  }, [drawingActive, liveStatsOn, scheduleDrawStats]);
+  useEffect(() => () => clearTimeout(drawStatsTimerRef.current), []);
   // 4D frame stepper state — { frame, nFrames }. nFrames stays 1 for a plain
   // 3D base volume, which is what keeps FrameStepper (and the ArrowLeft/
   // ArrowRight capture-phase claim below) inert for the common case.
@@ -962,7 +997,9 @@ export default function Dashboard() {
       // skipped; the base volume (opacity undefined here only if unset) stays.
       const opacity = opacityByName[v.name];
       const visible = layerShownRef.current[v.name] ?? (opacity === undefined || opacity > 0);
-      if (typeof v.value === "number" && visible && !String(name || "").endsWith("__labels")) {
+      // Left out: hidden label layers, and a quality fix's preview (lib/fixPreview.js).
+      if (typeof v.value === "number" && visible && !String(name || "").endsWith("__labels")
+          && !String(v.name || "").startsWith("__qc_fix")) {
         valueRows.push({ name: readoutName(v.name, name), value: v.value });
       }
     }
@@ -2593,6 +2630,19 @@ export default function Dashboard() {
     });
   }, [effectiveSidebarCollapsed, topbarCollapsed, appearance, drawingActive, appCanUndo]);
 
+  // A quality note's Go to (LesionQcDialog, SHOW_PLANE_EVENT): its view large,
+  // in the asymmetric layout. Left as it is when that view alone is on show.
+  useEffect(() => {
+    const onShow = (e) => {
+      const name = ["axial", "coronal", "sagittal"][e.detail?.plane];
+      if (!name || (!asymmetric && sliceType === name)) return;
+      setLargeSlice(name);
+      setAsymmetric(true);
+    };
+    window.addEventListener(SHOW_PLANE_EVENT, onShow);
+    return () => window.removeEventListener(SHOW_PLANE_EVENT, onShow);
+  }, [asymmetric, sliceType]);
+
   // Double-click in asymmetric mode → promote the clicked side view
   const handleDoubleClickSlice = useCallback((slice) => {
     if (!asymmetric || !slice) return;
@@ -2633,6 +2683,9 @@ export default function Dashboard() {
       // Idle-drawing QC (useLesionQcIdle) piggybacks on this SAME slot rather
       // than registering its own callback — see that hook's doc for why.
       notifyLesionQcDrawChange();
+      // A fix preview on show no longer matches a changed drawing.
+      cancelFixPreviewIfDrawingChanged();
+      scheduleDrawStats();
     });
     return () => viewer?.setDrawChangeCallback?.(null);
     // notifyLesionQcDrawChange is a stable function identity (useLesionQcIdle
@@ -3604,9 +3657,10 @@ export default function Dashboard() {
         const vertical = docked === "left" || docked === "right";
         return (
         <div role="toolbar" aria-label="View" aria-orientation={vertical ? "vertical" : "horizontal"} data-testid="topbar"
+          ref={toolbarCrowdingRef}
           data-vertical={vertical ? "" : undefined} data-expanded={vertical && toolbarExpanded ? "" : undefined}
           data-side={docked || undefined}
-          className={`toolbar flex min-h-12 flex-wrap items-center gap-[3px] bg-panel p-2 ${
+          className={`toolbar flex min-h-12 flex-wrap items-center gap-[3px] bg-panel p-2 ${vertical ? "" : "justify-center"} ${
             floating ? ""
             : vertical ? `h-full ${docked === "left" ? "border-r" : "border-l"} border-border`
             : docked === "bottom" ? "border-t border-border"
@@ -3622,7 +3676,8 @@ export default function Dashboard() {
           {taskToolbar && <ToolModeButton mode={toolMode} target={toolSuggested} onToggle={toggleToolMode} />}
           <div key={toolMode} className={taskToolbar ? "tool-stage flex min-w-0 flex-1 flex-wrap items-center gap-[3px]" : "contents"}
             data-from={taskToolbar ? toolSweep || undefined : undefined} data-testid={taskToolbar ? "tool-stage" : undefined}>
-          <div className={taskToolbar ? "tool-set flex min-w-0 flex-1 flex-wrap items-center gap-[3px]" : "contents"}>
+          {/* The tools sit together in the middle of the bar (owner, 12 Nov). */}
+          <div className={taskToolbar ? `tool-set flex min-w-0 flex-1 flex-wrap items-center gap-[3px] ${vertical ? "" : "justify-center"}` : "contents"}>
           {toolMode === "tracing" ? (
             <TracingTools activeTool={activeTool} brushMode={brushMode} task={taskState} />
           ) : toolMode === "analysing" ? (
@@ -3715,7 +3770,7 @@ export default function Dashboard() {
               </button>
             )}
           </div>
-          <span className="flex-1" />
+          <span className="tb-sep" />
           {/* Jump the crosshair to a typed MNI coordinate. Routes through the
               shared setCrosshairMM navigation primitive (same as the atlas
               region buttons / visfAtlas jump / workspace restore). */}
@@ -3966,9 +4021,12 @@ export default function Dashboard() {
               the viewer's DRAW MODE badge, until the drawing changes or paint
               mode turns off — no close button by design. Orange = warning,
               whatever the top flag's severity. */}
+          {/* Stacked under the DRAW MODE badge: the idle warning or the live
+              check, then the live lesion stats. */}
+          <div className="pointer-events-none absolute top-10 left-2 z-30 flex max-w-[min(26rem,calc(100%-1rem))] flex-col items-start gap-1 [&>*]:pointer-events-auto">
           {qcIdleWarning && (
             <div
-              className="absolute top-10 left-2 z-30 flex max-w-[min(26rem,calc(100%-1rem))] items-start gap-2 border border-warn/70 bg-black/80 px-2.5 py-2 text-[11px] text-warn shadow rounded-lg"
+              className="flex items-start gap-2 border border-warn/70 bg-black/80 px-2.5 py-2 text-[11px] text-warn shadow rounded-lg"
               role="status"
               data-testid="lesion-qc-idle-warning"
             >
@@ -3989,6 +4047,34 @@ export default function Dashboard() {
               </button>
             </div>
           )}
+          {/* Live check while drawing (lqtpy 0.8.0+, useLesionQcIdle's `live`):
+              always on show under the DRAW MODE badge, clean or not; it changes
+              shortly after each stroke. Click for the details. */}
+          {qcLive && (
+            <button
+              onClick={() => setQcIdleDetails(qcLive)}
+              className={`flex items-center gap-1.5 border bg-black/75 px-2 py-1 text-[11px] rounded-md ${
+                qcLive.needsAttention ? "border-warn/70 text-warn" : "border-ok/60 text-ok"}`}
+              title="LQTpy checks the drawing after each stroke. Click for the details."
+              data-testid="lesion-qc-live"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${qcLive.needsAttention ? "bg-warn" : "bg-ok"}`} />
+              {qcLive.verdict ? `Quality: ${qcLive.verdict}` : qcLive.needsAttention ? "Possible issues" : "Quality: no issues"}
+              {qcLive.flags.length > 0 && <span className="opacity-70">· {qcLive.flags.length} note{qcLive.flags.length === 1 ? "" : "s"}</span>}
+            </button>
+          )}
+          {/* Live lesion stats (Preferences ▸ Drawing, lib/drawingStats.js). */}
+          {drawStats && (
+            <div className="flex items-center gap-2 border border-border bg-black/75 px-2 py-1 font-mono text-[11px] text-muted-foreground rounded-md"
+              title="The drawing: its volume, how many axial slices it spans and its side. Preferences ▸ Drawing turns this off."
+              data-testid="lesion-live-stats">
+              <span className="text-foreground">{drawStats.volumeCm3.toLocaleString(undefined, { maximumFractionDigits: drawStats.volumeCm3 < 10 ? 2 : 1 })} cm³</span>
+              <span>{drawStats.axialSlices} slice{drawStats.axialSlices === 1 ? "" : "s"}</span>
+              {lesionQcMni && <span>{drawStats.side === "both" ? "both sides" : drawStats.side}</span>}
+            </div>
+          )}
+          </div>
+          <FixPreviewBar viewerRef={viewerRef} />
           {!focusMode && readoutMode === "beside" && (
             <BesideReadout wrapperRef={canvasWrapperRef} viewerRef={viewerRef} activeOrientation={activeOrientation}
               mm={crosshairMM} vox={crosshairVox} values={crosshairValues} labels={crosshairLabels} />
@@ -4216,10 +4302,14 @@ export default function Dashboard() {
           verdict={qcIdleDetails.verdict}
           engineVersion={qcIdleDetails.provenance?.version}
           onCancel={() => setQcIdleDetails(null)}
-          onGoTo={(mm) => {
+          onGoTo={(mm, plane) => {
             setQcIdleDetails(null);
-            viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2]);
+            viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2], plane);
           }}
+          onPreviewFix={fixPlanOk ? (finding) => {
+            setQcIdleDetails(null);
+            previewFindingFix({ viewerRef, finding, mni: lesionQcMni });
+          } : undefined}
           onFix={async (finding) => {
             const { lesionId } = qcIdleDetails;
             setQcIdleDetails(null);

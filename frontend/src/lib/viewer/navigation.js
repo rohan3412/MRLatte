@@ -21,7 +21,9 @@ export function createNavigationApi(ctx, { scheduleRedraw, applyZoomFactor, rese
   const { nvRef, rightDragModeRef, resizeCanvasRef } = ctx;
 
   return {
-    setCrosshairMM: (x, y, z) => {
+    // `axCorSag` (optional: 0 axial, 1 coronal, 2 sagittal) also makes that
+    // view the active one, as a click in it would (a quality note's Go to).
+    setCrosshairMM: (x, y, z, axCorSag) => {
       const nv = nvRef.current;
       if (!nv) return;
       try {
@@ -33,7 +35,7 @@ export function createNavigationApi(ctx, { scheduleRedraw, applyZoomFactor, rese
           // readout and the atlas-label bar refresh to the jumped-to point
           // (drawScene alone never re-runs it). Used by the atlas region-nav
           // buttons and the visfAtlas auto-jump.
-          try { nv.createOnLocationChange(); } catch (_e) {}
+          try { nv.createOnLocationChange(axCorSag >= 0 && axCorSag <= 2 ? axCorSag : undefined); } catch (_e) {}
           nv.drawScene();
         }
       } catch (_e) {}

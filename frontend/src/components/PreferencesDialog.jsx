@@ -77,6 +77,7 @@ export const PreferencesDialog = ({ open, onOpenChange, now }) => {
   const [width, setWidth] = usePreference("crosshairWidth");
   const [idleQc, setIdleQc] = usePreference("idleQc");
   const [idleSeconds, setIdleSeconds] = usePreference("idleQcSeconds");
+  const [liveStats, setLiveStats] = usePreference("liveLesionStats");
   const [effects, setEffects] = usePreference("visualEffects");
   const [transparency, setTransparency] = usePreference("transparency");
   const [performance, setPerformance] = usePreference("performanceMode");
@@ -130,7 +131,7 @@ export const PreferencesDialog = ({ open, onOpenChange, now }) => {
         </Row>
         <Row title="Transparency"
           hint={performance ? "Off while Performance mode is on."
-            : "Lets the desktop show through the top bar, sidebar and menus. The viewer stays opaque."}>
+            : "How much of the app shows, blurred, through menus, dialogs and floating panels."}>
           <div className={`flex w-40 items-center gap-2 ${performance ? "opacity-50" : ""}`}>
             <Slider value={[transparency]} min={0} max={80} step={5} disabled={performance}
               onValueChange={(v) => setTransparency(v[0])} className="flex-1" aria-label="Transparency"
@@ -196,18 +197,22 @@ export const PreferencesDialog = ({ open, onOpenChange, now }) => {
     ),
     drawing: (
       <Group>
-        <Row title="Check the drawing after a pause"
-          hint="Runs LQTpy's quality check in the background when you stop drawing, and shows what it finds on the viewer.">
-          <Switch checked={idleQc} onCheckedChange={setIdleQc} label="Check the drawing after a pause" testId="pref-idle-qc" />
+        <Row title="Check the drawing while you draw"
+          hint="Runs LQTpy's quality check in the background and shows what it finds on the viewer: after every stroke with LQTpy 0.8.0 or newer, otherwise after a pause.">
+          <Switch checked={idleQc} onCheckedChange={setIdleQc} label="Check the drawing while you draw" testId="pref-idle-qc" />
         </Row>
         {idleQc && (
-          <Row title="Pause before the check">
+          <Row title="Pause before the check" hint="With LQTpy before 0.8.0.">
             <select value={idleSeconds} onChange={(e) => setIdleSeconds(Number(e.target.value))} className="field"
               aria-label="Pause before the check" data-testid="pref-idle-seconds">
               {IDLE_SECONDS.map((s) => <option key={s} value={s}>{s < 60 ? `${s} s` : `${s / 60} min`}</option>)}
             </select>
           </Row>
         )}
+        <Row title="Lesion stats while drawing"
+          hint="The drawing's volume, how many axial slices it spans and its side, on the viewer, updated as you draw.">
+          <Switch checked={liveStats} onCheckedChange={setLiveStats} label="Lesion stats while drawing" testId="pref-live-stats" />
+        </Row>
       </Group>
     ),
     sidebar: (
@@ -301,7 +306,7 @@ export const PreferencesDialog = ({ open, onOpenChange, now }) => {
           <div className="my-1 rounded-md border border-border bg-card px-3 py-2 text-[12.5px] leading-relaxed text-muted-foreground" data-testid="pref-performance-details">
             <div className="font-medium text-foreground">Performance mode, while on:</div>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
-              <li>Transparency off: the window is opaque, menus are not frosted.</li>
+              <li>Transparency off: menus, dialogs and floating panels are solid.</li>
               <li>Visual effects off: scans, layers and checks appear at once, nothing glows.</li>
               <li>The first-run screen is not blurred.</li>
               <li>Faster 3D while moving: on (the setting below).</li>

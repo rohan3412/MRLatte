@@ -19,7 +19,15 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
 - **Task toolbar** (Preferences > Sidebar > Panels, off by default): a button at the left of the
   toolbar swaps the viewing tools for the tools of the task at hand: tracing while you draw, and
   analysing (quality check, atlas overlap, clusters, report) when a lesion or activation layer is
-  selected. Every button does what its sidebar twin does.
+  selected. Every button does what its sidebar twin does. When the toolbar has room, tracing also
+  offers Dilate, Erode and Smooth.
+- **The toolbar's tools sit together in the middle** of the bar instead of spreading to both ends.
+- **MRLatte starts in a small window** showing the loading screen, and grows to full size once the
+  viewer is ready.
+- **Lesion stats while drawing**: the drawing's volume, how many axial slices it spans and its side,
+  under the DRAW MODE badge, updated as you draw (Preferences > Drawing turns it off).
+- **A quality note's Go to shows its view large**: the viewer switches to the asymmetric layout with
+  the note's view in the big slot.
 - **Movable panels** (same place, off by default): drag the layer settings, the toolbar or the
   readout by their grip. Drop on a highlighted edge of the viewer to dock there, anywhere else to
   float it. Each preset remembers its own layout; Esc cancels a drag.
@@ -55,7 +63,25 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
 ### Tested on screen in CI
 - Each Windows, Mac and Linux build now opens the packaged app on the build machine and checks
   what it draws: the brain in 2D and 3D, a scan opened like a double-click, a drawing saved as a
-  lesion, and a report. Screenshots of each step are attached to the build.
+  lesion, and a report. Screenshots of each step are attached to the build. It then goes through
+  layouts: the sidebar as the icon strip with a section open over the viewer, the task toolbar and
+  draw mode, docked and floating panels, each at a small and a large window size, checking that the
+  viewer still draws and nothing spills out of the window or the toolbar.
+
+### LQTpy 0.8.0
+The LQTpy module now installs 0.8.0. With it (each part turns on only when the installed LQTpy can
+do it, so an older one works as before):
+- **The drawing is checked as you draw.** Shortly after each stroke a small badge under DRAW MODE
+  says how the drawing looks ("Quality: usable", or what to check); click it for the details. LQTpy
+  checks the drawing in memory, so nothing is written to disk per stroke. It replaces the warning
+  after a pause, under the same Preferences switch.
+- **Quality notes are in plain words**, written for the person fixing the mask.
+- **Preview a fix before applying it.** Each note LQTpy can fix has "Preview fix": the voxels it
+  would add show in green on the image, those it would remove in blue, with Apply (one Undo takes it
+  back) or Cancel. This now includes the fixes that add voxels: skipped slices, holes, outlines.
+- **Compare two lesion masks** (Longitudinal): volume change, Dice and Jaccard overlap, how far the
+  centre moved, and the regions newly damaged, no longer damaged or changed. No registration needed;
+  both masks must be in the same space.
 
 ### One place for a lesion's report
 - **A new Report section** (under Analysis) replaces the two tools that overlapped: the one-click
@@ -118,9 +144,13 @@ MRLatte for macOS, one Report section for lesion reports, and fixes from the inb
   it is still running 6 s later (macOS and Linux).
 - **A plain right-click on the image no longer shows the window-drag readout** behind its menu. The
   readout appears once the pointer actually moves.
-- **The desktop app repaints after resizing and after the Ctrl key hints hide.** With the see-through
-  window on Windows, stale strips of the sidebar stayed on screen, and the "D" key badge stayed until
-  the mouse crossed the sidebar.
+- **The window is no longer see-through; menus stay frosted.** Letting the desktop show through the
+  top bar and sidebar left faint leftovers on screen on Windows (strips of the sidebar after a
+  resize, the "D" key badge after releasing Ctrl, the collapsed sidebar's header after expanding it):
+  Windows drew each frame over the last without clearing it. Transparency now sets how much of the
+  app shows, blurred, through menus, dialogs and floating panels.
+- **Fixed: a quality note's Go to selects its view.** "Go to axial slice 108" moved the crosshair
+  but left another view highlighted; the note's view is now the active one.
 - **The sidebar's top row is a slim row of buttons, and which ones is a preference** (Preferences ▸
   Sidebar ▸ Header buttons): the module store, collapse all, collapse sidebar by default, plus light /
   dark mode, search, screenshot, focus mode, shortcuts and Preferences. The desktop app's title bar

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { runLesionQc } from "@/lib/lesionQc";
+import { runLesionQc, runLiveQc } from "@/lib/lesionQc";
+import { getCapabilities, hasFeature, closeLiveQc } from "@/lib/lesionMetrics";
 import { getPref } from "@/lib/preferences";
+
+// Live mode (lqtpy 0.8.0+, `qc.session`): instead of waiting for a pause, the
+// drawing is checked shortly after every stroke, in memory on the backend
+// (about 35 ms there), and the result is always on show as a small badge,
+// clean or not (`live`). The pause-and-warn behaviour below stays for an
+// older lqtpy. Both follow the same Preferences switch.
+const LIVE_DEBOUNCE_MS = 500;
 
 /**
  * Idle-drawing quality check (owner's idea-inbox request: "give a warning
@@ -32,7 +40,9 @@ import { getPref } from "@/lib/preferences";
  * idle timer that leads to a NEW check.
  *
  * @param {{viewerRef: object, active: boolean, mni: boolean}} args
- * @returns {{notifyDrawChange: () => void, idleWarning: {flags: object[], provenance: object, lesionId: string}|null}}
+ * @returns {{notifyDrawChange: () => void, idleWarning: {flags: object[], provenance: object, lesionId: string}|null,
+ *   live: {flags: object[], verdict: string|null, needsAttention: boolean, provenance: object}|null}}
+ *   `live`: the latest live check (live mode only, see LIVE_DEBOUNCE_MS), clean ones too.
  */
 export function useLesionQcIdle({ viewerRef, active, mni }) {
   // Live mirrors for the stable notifyDrawChange closure below — read
@@ -45,6 +55,13 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
   // The flagged QC result currently on show, or null. setIdleWarning is
   // stable, so the stable closures below can call it safely.
   const [idleWarning, setIdleWarning] = useState(null);
+  const [live, setLive] = useState(null);
+  // Whether this lqtpy can check live (asked when paint mode turns on), and the
+  // id of this drawing's session on the backend. A check that comes back after
+  // a newer one was asked for is dropped (`liveSeqRef`).
+  const liveOkRef = useRef(false);
+  const sessionRef = useRef(null);
+  const liveSeqRef = useRef(0);
 
   const timerRef = useRef(null);
   // lesionId of the drawing state already surfaced (warning shown) or found
@@ -75,6 +92,15 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
     setIdleWarning(result);
   };
 
+  const runLive = async () => {
+    if (!activeRef.current) return;
+    const seq = ++liveSeqRef.current;
+    if (!sessionRef.current) sessionRef.current = `drawing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const result = await runLiveQc({ viewerRef, session: sessionRef.current, mni: mniRef.current });
+    if (seq !== liveSeqRef.current || !activeRef.current) return; // a newer stroke, or paint mode off
+    setLive(result);   // null: an empty drawing, or nothing to say right now
+  };
+
   // Stable across renders (initialised once) — see the function doc above
   // for why this must never be recreated. Any drawing change retires the
   // warning on show: it described a drawing that no longer exists.
@@ -84,20 +110,40 @@ export function useLesionQcIdle({ viewerRef, active, mni }) {
     if (!activeRef.current) return;
     // Preferences can switch it off or change the pause; read at each draw
     // change, so a change there applies to the next pause.
-    if (!getPref("idleQc")) return;
+    if (!getPref("idleQc")) { setLive(null); return; }
+    if (liveOkRef.current) {
+      timerRef.current = setTimeout(runLive, LIVE_DEBOUNCE_MS);
+      return;
+    }
     timerRef.current = setTimeout(runIdleCheck, getPref("idleQcSeconds") * 1000);
   });
 
-  // Stop the pending check, and drop the warning, the moment paint mode
-  // turns off.
+  // Paint mode on: ask once whether this lqtpy checks live (the LQTpy module
+  // may have been installed or updated since). Off: stop the pending check,
+  // drop what is on show and forget the backend session.
   useEffect(() => {
-    if (!active) {
-      clearTimer();
-      setIdleWarning(null);
+    if (active) {
+      let gone = false;
+      getCapabilities().then((caps) => {
+        if (gone) return;
+        liveOkRef.current = hasFeature(caps, "qc.session");
+        // A drawing that is already there gets its badge at once.
+        if (liveOkRef.current && getPref("idleQc")) runLive();
+      }).catch(() => { liveOkRef.current = false; });
+      return () => { gone = true; };
     }
+    clearTimer();
+    setIdleWarning(null);
+    setLive(null);
+    liveSeqRef.current += 1;
+    if (sessionRef.current) { closeLiveQc(sessionRef.current); sessionRef.current = null; }
+    return undefined;
   }, [active]);
 
-  useEffect(() => clearTimer, []);
+  useEffect(() => () => {
+    clearTimer();
+    if (sessionRef.current) closeLiveQc(sessionRef.current);
+  }, []);
 
-  return { notifyDrawChange: notifyDrawChangeRef.current, idleWarning };
+  return { notifyDrawChange: notifyDrawChangeRef.current, idleWarning, live };
 }

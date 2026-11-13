@@ -1117,17 +1117,17 @@
     {
       "id": "lqtpy",
       "name": "LQTpy lesion analysis",
-      "description": "Lesion quality checks (Check drawing, Check a lesion mask, Fix), the lesion measures in the report, and LQTpy Analysis. Needs SciPy, which installs with it. One-click install downloads the LQTpy 0.7.0 wheel from its GitHub release (about 3.5 MB) and checks it against its pinned hash.",
+      "description": "Lesion quality checks (Check drawing, Check a lesion mask, Fix), the lesion measures in the report, and LQTpy Analysis. Needs SciPy, which installs with it. One-click install downloads the LQTpy 0.8.0 wheel from its GitHub release (about 3.5 MB) and checks it against its pinned hash.",
       "type": "python-package",
       "tier": "optional",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "unlocks": [
         "lesion-qc"
       ],
       "requires": [
         "python-scipy"
       ],
-      "bytes": 3450810,
+      "bytes": 3496873,
       "sha256": null,
       "installTo": "python/lqtpy",
       "pythonPackages": [
@@ -1141,9 +1141,9 @@
       "sources": [
         {
           "type": "wheel",
-          "url": "https://github.com/rohan3412/LQTpy/releases/download/v0.7.0/lqtpy-0.7.0-py3-none-any.whl",
-          "sha256": "88b8e6ae6c24fa591a2acbdd92145888b382347fb43f16a14b227e7ae8e59af2",
-          "bytes": 3450810
+          "url": "https://github.com/rohan3412/LQTpy/releases/download/v0.8.0/lqtpy-0.8.0-py3-none-any.whl",
+          "sha256": "1abc66c4dbc2b99b66e438fe643f397dfd81a40f2f08b817a05217fe4b72bfd0",
+          "bytes": 3496873
         }
       ]
     },

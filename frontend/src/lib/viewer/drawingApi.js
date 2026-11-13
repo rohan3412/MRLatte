@@ -443,6 +443,44 @@ export function createDrawingApi(ctx, {
       return n;
     },
 
+    // One previewed lqtpy fix (lqtpy 0.8.0 fix_plan): `added` / `removed` are
+    // mask files on the drawing's grid. Added voxels take the current pen's
+    // value, removed ones are cleared, as ONE undoable edit. The masks are read
+    // into bitmap order the same way removeVoxelsFromMask does (loadDrawing).
+    // Returns { added, removed } voxel counts, or null if a mask didn't fit.
+    applyFixMasks: async ({ added, removed }) => {
+      const nv = nvRef.current;
+      if (!nv?.drawBitmap) return null;
+      const before = nv.drawBitmap.slice();
+      const label = nv.opts?.penValue > 0 ? nv.opts.penValue : 1;
+      const read = async (file) => {
+        if (!file) return null;
+        const volume = await NVImage.loadFromFile({ file, name: file.name });
+        if (!nv.loadDrawing(volume) || nv.drawBitmap?.length !== before.length) throw new Error("grid");
+        return nv.drawBitmap.slice();
+      };
+      let add, del;
+      try {
+        add = await read(added);
+        del = await read(removed);
+      } catch (_e) {
+        if (nv.drawBitmap?.length === before.length) nv.drawBitmap.set(before);
+        try { nv.refreshDrawing(true); } catch (_e2) {}
+        return null;
+      }
+      const after = before.slice();
+      let nAdded = 0, nRemoved = 0;
+      for (let i = 0; i < after.length; i++) {
+        if (del?.[i] && after[i]) { after[i] = 0; nRemoved += 1; }
+        else if (add?.[i] && !after[i]) { after[i] = label; nAdded += 1; }
+      }
+      nv.drawBitmap.set(after);
+      if (nAdded || nRemoved) drawHistory.current.push(rleEncode(before), "Quality-check fix");
+      try { nv.refreshDrawing(true); } catch (_e) {}
+      emitHistory();
+      return { added: nAdded, removed: nRemoved };
+    },
+
     // Move / turn / resize the drawing itself (Draw panel's position block).
     // The transform is ABSOLUTE, measured from the drawing as it was before the
     // first move ("the base"), so holding a jog bar never piles up rounding:

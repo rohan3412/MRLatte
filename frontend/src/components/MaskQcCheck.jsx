@@ -80,7 +80,7 @@ export function MaskQcCheck({ lesion, userFileCache, mni, viewerRef, onAddFixedC
           verdict={result.verdict}
           engineVersion={result.provenance?.version}
           onCancel={() => setResult(null)}
-          onGoTo={(mm) => { setResult(null); viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2]); }}
+          onGoTo={(mm, plane) => { setResult(null); viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2], plane); }}
           onFix={fix}
         />
       )}

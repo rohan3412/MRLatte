@@ -890,10 +890,15 @@ function registerIpc() {
   // sizes are fixed above, so the renderer can't set an arbitrary minimum.
   // Reopening the sidebar in a window narrower than the open minimum grows
   // the window to it rather than leaving it below its own minimum.
+  // The app's viewer is ready: the loading window grows to full size.
+  ipcMain.on("mrlatte:appReady", (e) => growToFull(BrowserWindow.fromWebContents(e.sender)));
+
   ipcMain.on("mrlatte:setSidebarOpen", (e, open) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win || win.isDestroyed()) return;
     const minW = open === true ? MIN_WIDTH_SIDEBAR_OPEN : MIN_WIDTH_SIDEBAR_CLOSED;
+    win.__minWidth = minW;
+    if (win.__loadingSize) return;   // still the small loading window: growToFull applies it
     win.setMinimumSize(minW, MIN_HEIGHT);
     const [w, h] = win.getSize();
     if (w < minW && !win.isMaximized() && !win.isFullScreen()) win.setSize(minW, h);
@@ -915,33 +920,6 @@ function registerIpc() {
   // The app's own light/dark choice → the native chrome (menus, title bar) and
   // the CSS prefers-color-scheme query that nativeTheme.themeSource drives.
   // Remembered across runs so the first loading page already follows it.
-  // Preferences ▸ Transparency (hooks/useWindowLook.js): the OS material behind
-  // a transparent page. Windows 11 acrylic, macOS vibrancy; elsewhere (Windows
-  // 10, Linux) there is none and the window stays as it is. Off restores the
-  // opaque background the window was created with.
-  ipcMain.on("mrlatte:setWindowMaterial", (e, on) => {
-    const win = BrowserWindow.fromWebContents(e.sender);
-    if (!win || win.isDestroyed()) return;
-    try {
-      if (process.platform === "win32" && typeof win.setBackgroundMaterial === "function") {
-        win.setBackgroundColor(on ? "#00000000" : "#050505");
-        win.setBackgroundMaterial(on ? "acrylic" : "none");
-      } else if (process.platform === "darwin") {
-        win.setBackgroundColor(on ? "#00000000" : "#050505");
-        win.setVibrancy(on ? "under-window" : null);
-      }
-    } catch (err) {
-      console.warn("[electron] window material:", err && err.message);
-    }
-  });
-
-  // A see-through window (the material above) repaints late on Windows: what
-  // the page removes can stay on screen until something nearby redraws (a
-  // shortcut hint's key badge stayed until the mouse crossed the sidebar).
-  // The page asks for a full repaint after such a change.
-  ipcMain.on("mrlatte:repaint", (e) => {
-    try { e.sender.invalidate(); } catch (_e) { /* best effort */ }
-  });
 
   ipcMain.on("mrlatte:setAppearance", (_e, mode) => {
     if (!APPEARANCE_MODES.includes(mode)) return;
@@ -1010,17 +988,23 @@ function refreshTitleBarOverlays() {
 // "System" look follows the OS, so the bar's colours must follow it too.
 nativeTheme.on("updated", refreshTitleBarOverlays);
 
-function createMainWindow(openFilePath) {
+// The first window starts small, just the loading screen (owner, 12 Nov), and
+// grows to FULL_SIZE once the app says its viewer is ready (mrlatte:appReady),
+// or LOADING_GROW_MS after the app loaded if it never says so.
+const LOADING_SIZE = { width: 560, height: 380 };
+const FULL_SIZE = { width: 1600, height: 1000 };
+const LOADING_GROW_MS = 20000;
+
+function createMainWindow(openFilePath, { loading = false } = {}) {
   const win = new BrowserWindow({
     ...titleBarOptions(),
-    width: 1600,
-    height: 1000,
+    ...(loading ? { ...LOADING_SIZE, center: true, resizable: false, maximizable: false } : FULL_SIZE),
     // Lowered from 1200x720 so the window can be parked small beside another
     // app. ~880px leaves a usable canvas with the sidebar open; with it
     // closed the renderer reports that and the minimum drops further (see
     // mrlatte:setSidebarOpen / MIN_WIDTH_*).
-    minWidth: MIN_WIDTH_SIDEBAR_OPEN,
-    minHeight: MIN_HEIGHT,
+    minWidth: loading ? LOADING_SIZE.width : MIN_WIDTH_SIDEBAR_OPEN,
+    minHeight: loading ? LOADING_SIZE.height : MIN_HEIGHT,
     backgroundColor: "#050505",
     title: "MRLatte",
     autoHideMenuBar: false,
@@ -1053,23 +1037,6 @@ function createMainWindow(openFilePath) {
   win.on("focus", () => {
     lastFocusedWindow = win;
   });
-  // Resizing a see-through window left stale strips of the old layout
-  // (sidebar edges) on Windows: repaint the whole page once the size settles,
-  // and on every step while dragging (coalesced to one per frame).
-  let repaintQueued = false;
-  const repaintAll = () => {
-    if (repaintQueued || win.isDestroyed()) return;
-    repaintQueued = true;
-    setTimeout(() => {
-      repaintQueued = false;
-      if (!win.isDestroyed()) try { win.webContents.invalidate(); } catch (_e) { /* best effort */ }
-    }, 16);
-  };
-  win.on("resize", repaintAll);
-  win.on("resized", repaintAll);
-  win.on("maximize", repaintAll);
-  win.on("unmaximize", repaintAll);
-
   win.on("closed", () => {
     windows.delete(win);
     pendingOpenByWc.delete(wcId);
@@ -1086,6 +1053,25 @@ function createMainWindow(openFilePath) {
   });
 
   return win;
+}
+
+// The loading window becomes a normal one: full size, centred on the screen
+// it is on (no bigger than that screen), resizable. Once only.
+function growToFull(win) {
+  if (!win || win.isDestroyed() || !win.__loadingSize) return;
+  win.__loadingSize = false;
+  const { screen } = require("electron");
+  const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+  const width = Math.min(FULL_SIZE.width, wa.width);
+  const height = Math.min(FULL_SIZE.height, wa.height);
+  win.setResizable(true);
+  win.setMaximizable(true);
+  win.setMinimumSize(win.__minWidth || MIN_WIDTH_SIDEBAR_OPEN, MIN_HEIGHT);
+  win.setBounds({
+    x: Math.round(wa.x + (wa.width - width) / 2),
+    y: Math.round(wa.y + (wa.height - height) / 2),
+    width, height,
+  });
 }
 
 function focusedOrLastWindow() {
@@ -1153,7 +1139,14 @@ function setLoadingStatus(win, text) {
 // on macOS) goes through openNewWindow instead, since the backend is already
 // up by then.
 async function bootFirstWindow(openFilePath) {
-  const win = createMainWindow(openFilePath);
+  const win = createMainWindow(openFilePath, { loading: true });
+  win.__loadingSize = true;
+  // Never stuck small: grow once the app has loaded, if it doesn't say it's ready.
+  win.webContents.on("did-finish-load", () => {
+    if (win.__loadingSize && win.webContents.getURL().startsWith("http")) {
+      setTimeout(() => growToFull(win), LOADING_GROW_MS);
+    }
+  });
   await win.loadURL(loadingHtml());
   try {
     if (!(await checkPort(BACKEND_PORT))) {

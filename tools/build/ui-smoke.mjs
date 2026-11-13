@@ -303,6 +303,113 @@ async function main() {
       else fail(`the report places the lesion wrongly (expected left, near MNI -20, 14, 18): "${where || text.slice(0, 200)}"`);
     } catch (e) { await shot(page2, "05-report-failed", "body"); fail(`report: ${e.message}`); }
   }
+
+  // 6. Layouts (owner, 12 Nov: "problems in specific situations the checks
+  // miss"). In the first window: the sidebar as the icon strip with a section
+  // opened over the viewer, the task toolbar, draw mode, and docked or
+  // floating panels, each at a small and a large window size.
+  await layoutChecks(page);
+}
+
+// Each layout: the viewer still draws the brain; nothing spills past the
+// window or the toolbar; a section opened from the icon strip covers the
+// viewer opaquely; the task toolbar's extra tools come only with room.
+async function layoutChecks(page) {
+  const SIZES = [[1024, 700], [1600, 1000]];
+  const reloadWith = async (prefs) => {
+    await page.evaluate(`(() => {
+      const p = JSON.parse(localStorage.getItem("mrlatte-prefs") || "{}");
+      Object.assign(p, ${JSON.stringify(prefs)});
+      localStorage.setItem("mrlatte-prefs", JSON.stringify(p));
+      location.reload();
+      return 1;
+    })()`).catch(() => {});
+    await sleep(1500);
+    await until("the template after a reload", () => page.evaluate(`/MNI152/.test(document.title) && !!document.querySelector("#niivue-canvas")`), 180000);
+    await noHomeScreen(page);
+  };
+  const size = async ([w, h]) => {
+    await page.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    await sleep(1200);
+  };
+  // Geometry problems on the page as it is now, as text (empty: none).
+  const problems = () => page.evaluate(`(() => {
+    const out = [];
+    const doc = document.documentElement;
+    if (doc.scrollWidth > innerWidth + 1) out.push("the page is wider than the window (" + doc.scrollWidth + " > " + innerWidth + ")");
+    const bar = document.querySelector('[data-testid="topbar"]');
+    if (bar) {
+      const r = bar.getBoundingClientRect();
+      for (const el of bar.querySelectorAll("button")) {
+        const b = el.getBoundingClientRect();
+        if (!b.width || getComputedStyle(el).visibility === "hidden") continue;
+        if (b.right > r.right + 1 || b.bottom > r.bottom + 1 || b.left < r.left - 1) { out.push("a toolbar button sticks out of the toolbar: " + (el.dataset.testid || el.title || el.textContent.trim()).slice(0, 40)); break; }
+      }
+    }
+    const side = document.querySelector('[data-testid="sidebar"][class*="absolute"]');
+    if (side) {
+      const bg = getComputedStyle(side).backgroundColor;
+      const a = /rgba?\\(([^)]+)\\)/.exec(bg)?.[1].split(",").map(Number)[3];
+      if (a !== undefined && a < 1) out.push("the section opened from the icon strip is see-through over the viewer (" + bg + ")");
+    }
+    return out;
+  })()`);
+  const check = async (name) => {
+    const s = await shot(page, `06-layout-${name}`);
+    const found = await problems();
+    if (!drawn(s)) found.push(`the viewer looks blank (${JSON.stringify(s)})`);
+    if (found.length) fail(`layout ${name}: ${found.join("; ")}`);
+    return !found.length;
+  };
+
+  // A: icon strip, Draw mask opened from it, drawing on, the Tracing tools.
+  await reloadWith({ taskToolbar: true, movablePanels: false });
+  let allOk = true;
+  for (const sz of SIZES) {
+    await size(sz);
+    if (!(await page.evaluate(`!!document.querySelector('[data-testid="sidebar-expand-toggle"]')`))) await click(page, "sidebar-collapse-toggle");
+    await sleep(500);
+    await click(page, "rail-section-drawing");
+    await sleep(800);
+    const label = await page.evaluate(`document.querySelector('[data-testid="drawing-toggle"]')?.textContent || ""`);
+    if (!/active/.test(label)) await click(page, "drawing-toggle");
+    await sleep(800);
+    if ((await page.evaluate(`document.querySelector('[data-testid="tool-mode-toggle"]')?.dataset.mode`)) !== "tracing") await click(page, "tool-mode-toggle");
+    await sleep(800);
+    allOk = (await check(`strip-peek-tracing-${sz[0]}`)) && allOk;
+    // The extra tools (Dilate / Erode / Smooth) follow the room the toolbar has.
+    const room = await page.evaluate(`(() => { const s = document.querySelector('[data-testid="tool-stage"]'), t = document.querySelector('[data-testid="task-room"]'); return s && t ? { w: s.getBoundingClientRect().width, shown: getComputedStyle(t).display !== "none" } : null; })()`);
+    if (room && room.shown !== room.w >= 980) { fail(`layout strip-peek-tracing-${sz[0]}: the extra tracing tools ${room.shown ? "show" : "hide"} at ${Math.round(room.w)} px`); allOk = false; }
+    await click(page, "sidebar-expand-toggle");
+    await sleep(600);
+    allOk = (await check(`sidebar-tracing-${sz[0]}`)) && allOk;
+  }
+  if (allOk) ok("layouts: icon strip with a section open, task toolbar, draw mode, small and large windows");
+
+  // B: movable panels: the toolbar docked left (the icon strip), the drawing
+  // panel docked right, the readout floating.
+  const layout = { toolbar: { dock: "left" }, "section-drawing": { dock: "right", order: 0, weight: 1 }, readout: { dock: "float", x: 420, y: 140 } };
+  // Stored per preset; no preset chosen is "default" (Movable.jsx usePlacement).
+  await reloadWith({ movablePanels: true, panelLayouts: { default: layout, everything: layout } });
+  const placed = await page.evaluate(`(() => {
+    const bar = document.querySelector('[data-testid="topbar"]');
+    return {
+      toolbarLeft: bar?.dataset.side === "left",
+      drawingRight: /Draw mask/.test(document.querySelector('[data-testid="dock-right"]')?.innerText || ""),
+      readoutFloating: !!document.querySelector('[data-movable="readout"][data-floating]'),
+    };
+  })()`);
+  if (!placed.toolbarLeft || !placed.drawingRight || !placed.readoutFloating) {
+    fail(`layout docked: the stored layout wasn't applied (${JSON.stringify(placed)})`);
+  }
+  allOk = placed.toolbarLeft && placed.drawingRight && placed.readoutFloating;
+  for (const sz of SIZES) {
+    await size(sz);
+    allOk = (await check(`docked-${sz[0]}`)) && allOk;
+  }
+  if (allOk) ok("layouts: toolbar docked left, drawing panel docked right, readout floating, small and large windows");
+  // Leave the window as the earlier steps had it.
+  await page.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
 }
 
 function stopApp() {

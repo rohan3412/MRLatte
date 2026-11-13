@@ -833,3 +833,115 @@ def test_capabilities_qc_available_false_when_qc_module_missing(monkeypatch, syn
     body = r.json()
     assert body["available"] is True
     assert body["qc_available"] is False
+
+
+# --------------------------------------------------------------------------- #
+# lqtpy 0.8.0 for drawing tools: advice, fix previews, the live check while
+# drawing, comparing two masks. Each runs only when lqtpy.capabilities() lists
+# it; on an older lqtpy the endpoints answer 503 and the frontend never asks.
+# --------------------------------------------------------------------------- #
+
+def _has(feature):
+    return feature in lesion_metrics.features()
+
+
+def _gappy_speck_lesion() -> np.ndarray:
+    """A sphere with two undrawn slices through it, plus a stray voxel."""
+    data = _sphere_mask(shape=(40, 40, 40), center=(20, 20, 20), radius=8)
+    data[:, :, 18:20] = 0
+    data[3, 3, 3] = 1.0
+    return data
+
+
+def test_capabilities_lists_features(synthetic_atlas):
+    body = client.get("/api/lesion/capabilities").json()
+    assert isinstance(body["features"], list)
+    assert set(body["features"]) == set(lesion_metrics.features())
+
+
+@pytest.mark.skipif(not _has("qc.advice"), reason="advice arrived in lqtpy 0.8.0")
+def test_qc_findings_carry_plain_advice(synthetic_atlas):
+    lesion_id = _upload(_gappy_speck_lesion())
+    body = client.post("/api/lesion/qc", json={"lesion_id": lesion_id, "mni": False}).json()
+    gaps = next(f for f in body["flags"] if f["id"] == "sparse_slices")
+    assert gaps["advice"]["action"] == "interpolate_gaps"
+    assert gaps["advice"]["adds_voxels"] is True
+    assert gaps["advice"]["text"]
+
+
+@pytest.mark.skipif(not _has("qc.fix_plan"), reason="fix_plan arrived in lqtpy 0.8.0")
+def test_fix_plan_previews_adding_and_removing_fixes(synthetic_atlas):
+    data = _gappy_speck_lesion()
+    lesion_id = _upload(data)
+    r = client.post("/api/lesion/qc/fix-plan", json={"lesion_id": lesion_id, "mni": False})
+    assert r.status_code == 200, r.text
+    fixes = {f["id"]: f for f in r.json()["fixes"]}
+    speck, gaps = fixes["specks"], fixes["sparse_slices"]
+    removed = _decode_mask(speck["removed_mask"])
+    assert removed[3, 3, 3] and speck["voxels_removed"] == int(removed.sum()) == 1
+    assert speck["voxels_added"] == 0 and not speck["adds_voxels"]
+    added = _decode_mask(gaps["added_mask"])
+    assert gaps["adds_voxels"] and gaps["voxels_added"] == int(added.sum()) > 0
+    assert added[:, :, 18:20].sum() == added.sum()     # only the skipped slices are filled
+    assert not (added & (data > 0)).any()              # and nothing already drawn
+    # One fix asked for: only that one.
+    r = client.post("/api/lesion/qc/fix-plan", json={"lesion_id": lesion_id, "mni": False,
+                                                      "finding_ids": ["specks"]})
+    assert [f["id"] for f in r.json()["fixes"]] == ["specks"]
+
+
+@pytest.mark.skipif(not _has("qc.session"), reason="qc.Session arrived in lqtpy 0.8.0")
+def test_live_check_follows_the_drawing(synthetic_atlas):
+    def live(data):
+        r = client.post("/api/lesion/qc/live",
+                        files={"file": ("d.nii", _nifti_bytes(data), "application/octet-stream")},
+                        data={"session": "drawing-test-1", "mni": "false",
+                              "context": json.dumps({"labels_are_colours": True})})
+        assert r.status_code == 200, r.text
+        return r.json()
+    first = live(_gappy_speck_lesion())
+    assert "sparse_slices" in [f["id"] for f in first["flags"]]
+    assert first["provenance"]["engine"] == "lqtpy.qc.Session"
+    clean = live(_sphere_mask(shape=(40, 40, 40), center=(20, 20, 20), radius=8))
+    assert "sparse_slices" not in [f["id"] for f in clean["flags"]]
+    assert clean["verdict"] == "usable"
+    # The same check as a saved file of the same voxels gives.
+    lesion_id = _upload(_sphere_mask(shape=(40, 40, 40), center=(20, 20, 20), radius=8))
+    saved = client.post("/api/lesion/qc", json={"lesion_id": lesion_id, "mni": False, "tier": "fast",
+                                                "context": {"labels_are_colours": True}}).json()
+    assert saved["verdict"] == clean["verdict"]
+    assert client.delete("/api/lesion/qc/live/drawing-test-1").json() == {"closed": True}
+    assert client.delete("/api/lesion/qc/live/drawing-test-1").json() == {"closed": False}
+
+
+def test_live_check_refuses_a_bad_session_id(synthetic_atlas):
+    r = client.post("/api/lesion/qc/live", files={"file": ("d.nii", _nifti_bytes(_cube_lesion()))},
+                    data={"session": "../x"})
+    assert r.status_code == 400
+
+
+@pytest.mark.skipif(not _has("compare"), reason="compare arrived in lqtpy 0.8.0")
+def test_compare_two_masks(synthetic_atlas):
+    big = _upload(_sphere_mask(shape=(40, 40, 40), center=(20, 20, 20), radius=8))
+    small = _upload(_sphere_mask(shape=(40, 40, 40), center=(20, 20, 20), radius=6))
+    r = client.post("/api/lesion/compare", json={"a_lesion_id": big, "b_lesion_id": small})
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert c["volume"]["change_mm3"] < 0 and c["volume"]["change_pct"] < 0
+    assert 0 < c["overlap"]["dice"] < 1
+    assert c["centroid_shift_mm"] < 1
+    assert {"gained", "lost", "changed"} <= set(c["regions"])
+
+
+def test_new_features_answer_503_on_an_older_lqtpy(monkeypatch, synthetic_atlas):
+    monkeypatch.setattr(lesion_metrics, "features", lambda: {})
+    lesion_id = _upload(_gappy_speck_lesion())
+    assert client.post("/api/lesion/qc/fix-plan", json={"lesion_id": lesion_id}).status_code == 503
+    assert client.post("/api/lesion/compare", json={"a_lesion_id": lesion_id,
+                                                     "b_lesion_id": lesion_id}).status_code == 503
+    r = client.post("/api/lesion/qc/live", files={"file": ("d.nii", _nifti_bytes(_cube_lesion()))},
+                    data={"session": "drawing-test-2"})
+    assert r.status_code == 503
+    # And the quality check itself carries no advice.
+    body = client.post("/api/lesion/qc", json={"lesion_id": lesion_id, "mni": False}).json()
+    assert all("advice" not in f for f in body["flags"])

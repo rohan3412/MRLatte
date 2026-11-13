@@ -129,6 +129,19 @@ def import_error() -> "Exception | None":
     return _LQTPY_IMPORT_ERROR
 
 
+def features() -> dict:
+    """What this lqtpy can do, from `lqtpy.capabilities()` (0.8.0+): `{name:
+    True}` for each feature that works in this installation ("qc.advice",
+    "qc.fix_plan", "qc.session", "compare", ...). Names are only ever added
+    (lqtpy docs/INTEGRATION.md). {} for an older lqtpy or none. Never raises."""
+    if _ensure_lqtpy() is None or not callable(getattr(lqtpy, "capabilities", None)):
+        return {}
+    try:
+        return {str(k): True for k, v in (lqtpy.capabilities().get("features") or {}).items() if v}
+    except Exception:  # noqa: BLE001 -- a broken probe means "nothing extra"
+        return {}
+
+
 # --------------------------------------------------------------------------- #
 # Atlas bridging: MRLatte's atlas_registry -> lqtpy.register_atlas
 # --------------------------------------------------------------------------- #
@@ -369,8 +382,11 @@ def run_qc(lesion_path, *, mni: bool = True, threshold: float = DEFAULT_THRESHOL
     tier = tier if tier in QC_TIERS else "full"
     verdict = score = qc_version = needs_attention = None
     if hasattr(lqtpy.qc, "assess"):
+        # lqtpy 0.8.0+: each finding also carries `advice` ({action, text,
+        # fix_id, adds_voxels}), plain words for the person fixing the mask.
+        advice = {"advice": True} if "qc.advice" in features() else {}
         result = lqtpy.qc.assess(lesion_path, threshold=threshold, mni=mni,
-                                 context=context or None, tier=tier).to_dict()
+                                 context=context or None, tier=tier).to_dict(**advice)
         flags = result.get("findings", [])
         verdict, score = result.get("verdict"), result.get("score")
         qc_version = result.get("qc_version")
@@ -454,6 +470,123 @@ def run_qc_fix(lesion_path, finding_ids, *, threshold: float = DEFAULT_THRESHOLD
         fixed = nib.Nifti1Image(data, src.affine, src.header)
         result["fixed_mask"] = base64.b64encode(gzip.compress(fixed.to_bytes())).decode("ascii")
     return result
+
+
+# --------------------------------------------------------------------------- #
+# lqtpy 0.8.0 for drawing tools (lqtpy docs/INTEGRATION.md): fix previews, a
+# live check while drawing, and comparing two masks. Each runs only when
+# features() lists it; on an older lqtpy it answers 503 and the frontend,
+# which reads the same list from /lesion/capabilities, never asks.
+# --------------------------------------------------------------------------- #
+
+def _require(feature: str, what: str) -> None:
+    if feature not in features():
+        if _ensure_lqtpy() is None:
+            raise LqtpyUnavailableError()
+        raise LqtpyUnavailableError(
+            f"This backend's lqtpy (version {version()}) cannot {what} -- "
+            "that needs lqtpy 0.8.0 or newer.")
+
+
+def _mask_b64(mask, like) -> str:
+    """A boolean mask as a gzipped uint8 NIfTI on `like`'s grid (its header
+    transforms kept), base64: what the frontend loads into the drawing grid."""
+    import base64
+    import gzip
+    import nibabel as nib
+    import numpy as np
+    out = nib.Nifti1Image(np.asarray(mask, dtype=np.uint8), like.affine)
+    out.set_qform(like.header.get_qform(), code=int(like.header["qform_code"]))
+    out.set_sform(like.header.get_sform(), code=int(like.header["sform_code"]))
+    return base64.b64encode(gzip.compress(out.to_bytes())).decode("ascii")
+
+
+def run_fix_plan(lesion_path, finding_ids=None, *, threshold: float = DEFAULT_THRESHOLD,
+                 context: "dict | None" = None, mni: bool = True) -> dict:
+    """Every fix lqtpy can make for this mask (or for `finding_ids`), each
+    worked out on its own from the mask as it is, for a preview: the voxels it
+    would add and remove, as masks on the lesion's own grid. Nothing is
+    written. The caller applies one as a single undoable edit and then plans
+    again (fixes can overlap). Unlike run_qc_fix this includes the fixes that
+    ADD voxels (gaps, holes, outlines): the person sees them before choosing."""
+    import nibabel as nib
+    _require("qc.fix_plan", "preview fixes")
+    src = nib.load(str(lesion_path))
+    plan = lqtpy.qc.fix_plan(src, threshold=threshold, context=context or None,
+                             ids=list(finding_ids) if finding_ids else None, mni=mni)
+    fixes = []
+    for e in plan:
+        if tuple(e["added"].shape) != tuple(src.shape[:3]):
+            raise LesionMetricsError(
+                f"lqtpy returned a {e['added'].shape} mask for a {tuple(src.shape[:3])} lesion")
+        fix = {k: e.get(k) for k in ("id", "label", "action", "advice", "adds_voxels")}
+        fix["voxels_added"], fix["voxels_removed"] = int(e["voxels_added"]), int(e["voxels_removed"])
+        fix["added_mask"], fix["removed_mask"] = _mask_b64(e["added"], src), _mask_b64(e["removed"], src)
+        fixes.append(fix)
+    return {"fixes": fixes, "provenance": {"engine": "lqtpy.qc.fix_plan", "version": version(),
+                                           "threshold": threshold}}
+
+
+# One lqtpy QC session per open drawing (keyed by an id the frontend picks), so
+# each stroke is checked in memory: no file is written per stroke, and an
+# unchanged drawing returns the last result at once. A few at most; the oldest
+# goes first. A session lives as long as its drawing, or until it is pushed out.
+LIVE_SESSIONS_MAX = 4
+_LIVE: "dict[str, tuple]" = {}
+_LIVE_LOCK = threading.Lock()
+
+
+def live_check(key: str, nifti_bytes: bytes, *, mni: bool = True,
+               context: "dict | None" = None, tier: "str | None" = None) -> dict:
+    """Check the drawing in `nifti_bytes` (the same NIfTI Save would upload)
+    in its live session: the result has run_qc's shape. The session holds no
+    file, so header problems are not reported here; Save still checks the file."""
+    import gzip
+    import json
+    import nibabel as nib
+    import numpy as np
+    _require("qc.session", "check a drawing while it is drawn")
+    raw = gzip.decompress(nifti_bytes) if nifti_bytes[:2] == b"\x1f\x8b" else nifti_bytes
+    img = nib.Nifti1Image.from_bytes(raw)
+    mask = np.asanyarray(img.dataobj)
+    tier = tier if tier in QC_TIERS else "fast"
+    # A new grid, base or drawing context starts a new session.
+    sig = (mask.shape, np.round(img.affine, 5).tobytes(), bool(mni), json.dumps(context or {}, sort_keys=True))
+    with _LIVE_LOCK:
+        entry = _LIVE.pop(key, None)
+        if entry is None or entry[1] != sig:
+            entry = (lqtpy.qc.Session(mask=mask, affine=img.affine, context=context or None, mni=mni), sig)
+        else:
+            entry[0].set_mask(mask)
+        _LIVE[key] = entry
+        while len(_LIVE) > LIVE_SESSIONS_MAX:
+            _LIVE.pop(next(iter(_LIVE)))
+    checked = entry[0].check(tier=tier)
+    result = checked.to_dict(advice=True) if checked is not None else {}
+    return {
+        "flags": result.get("findings", []),
+        "verdict": result.get("verdict"),
+        "score": result.get("score"),
+        "qc_version": result.get("qc_version"),
+        "needs_attention": result.get("needs_attention"),
+        "provenance": {"engine": "lqtpy.qc.Session", "version": version(), "mni": mni, "tier": tier},
+    }
+
+
+def live_close(key: str) -> bool:
+    with _LIVE_LOCK:
+        return _LIVE.pop(key, None) is not None
+
+
+def run_compare(a_path, b_path, *, threshold: float = DEFAULT_THRESHOLD) -> dict:
+    """What changed from mask `a` to mask `b` (a baseline and a follow-up, or
+    two drawings of one lesion): volume change, Dice / Jaccard, centroid shift
+    and the regions gained, lost and changed, by lqtpy.compare. Both masks must
+    be in the same space; exact on a shared grid, on the 1 mm MNI grid otherwise."""
+    import json
+    _require("compare", "compare two masks")
+    out = lqtpy.compare(str(a_path), str(b_path), threshold=threshold)
+    return json.loads(json.dumps(out, default=float))   # plain JSON: no numpy scalars
 
 
 # --------------------------------------------------------------------------- #

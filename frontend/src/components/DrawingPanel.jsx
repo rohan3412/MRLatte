@@ -17,6 +17,8 @@ import { BASE_VOLUME } from "@/lib/atlasConfig";
 import { runLesionQc, applyQcFix } from "@/lib/lesionQc";
 import { undoToastOptions } from "@/lib/undoToast";
 import { LesionQcDialog, findingMM } from "@/components/LesionQcDialog";
+import { previewFindingFix } from "@/components/FixPreviewBar";
+import { useLqtpyFeature } from "@/hooks/useLqtpyFeature";
 import { OverlayTransformControls } from "@/components/OverlayTransformControls";
 import { IDENTITY_TRANSFORM } from "@/lib/overlayTransform";
 
@@ -107,6 +109,8 @@ export const DrawingPanel = ({
   // Dashboard decides (name match or an exact MNI template grid, lib/mniGrid.js);
   // the name comparison is only the fallback for a caller that doesn't say.
   const mni = baseIsMni ?? (baseName === BASE_VOLUME.name);
+  // lqtpy 0.8.0+: quality notes offer "Preview fix" (FixPreviewBar).
+  const fixPlanOk = useLqtpyFeature("qc.fix_plan");
 
   // Run QC on `file` (already-serialised current drawing) and, if it finds
   // anything, block on a confirmation dialog before the caller proceeds.
@@ -950,15 +954,19 @@ export const DrawingPanel = ({
           onCancel={() => { qcPrompt.resolve(false); setQcPrompt(null); }}
           // Both of these mean "don't save yet": the save is cancelled exactly
           // as Keep editing would, then the viewer does the helpful thing.
-          onGoTo={(mm) => {
+          onGoTo={(mm, plane) => {
             qcPrompt.resolve(false); setQcPrompt(null);
-            viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2]);
+            viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2], plane);
           }}
           onFix={(finding) => {
             const { lesionId } = qcPrompt;
             qcPrompt.resolve(false); setQcPrompt(null);
             fixFinding(finding, lesionId);
           }}
+          onPreviewFix={fixPlanOk ? (finding) => {
+            qcPrompt.resolve(false); setQcPrompt(null);
+            previewFindingFix({ viewerRef, finding, mni });
+          } : undefined}
           onInterpolate={() => {
             qcPrompt.resolve(false); setQcPrompt(null);
             viewerRef.current?.interpolateAllDrawnSlices?.();
@@ -973,8 +981,9 @@ export const DrawingPanel = ({
           verdict={qcManual.verdict}
           engineVersion={qcManual.provenance?.version}
           onCancel={() => setQcManual(null)}
-          onGoTo={(mm) => { setQcManual(null); viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2]); }}
+          onGoTo={(mm, plane) => { setQcManual(null); viewerRef.current?.setCrosshairMM?.(mm[0], mm[1], mm[2], plane); }}
           onFix={(finding) => { const { lesionId } = qcManual; setQcManual(null); fixFinding(finding, lesionId); }}
+          onPreviewFix={fixPlanOk ? (finding) => { setQcManual(null); previewFindingFix({ viewerRef, finding, mni }); } : undefined}
         />
       )}
     </div>

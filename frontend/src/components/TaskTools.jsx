@@ -1,7 +1,7 @@
 import React from "react";
 import {
-  AlignVerticalSpaceAround, Box, Brush, Check, Eraser, FileText, Layers, Pencil, PencilRuler, Redo2, Save, Scissors,
-  ScanEye, ShieldCheck, Sigma, Square, Undo2,
+  AlignVerticalSpaceAround, Box, Brush, Check, Eraser, Expand, FileText, Layers, Pencil, PencilRuler, Redo2, Save, Scissors,
+  ScanEye, ShieldCheck, Shrink, Sigma, Square, Undo2, Waves,
 } from "lucide-react";
 
 // The task toolbar's task sets (Preferences ▸ Sidebar ▸ Panels ▸ Task toolbar).
@@ -79,7 +79,15 @@ export function TracingTools({ activeTool, brushMode, task }) {
         title="Fill the gap between the last two slices you drew" onClick={() => press("draw-interpolate")} />
       <Btn icon={Undo2} label="Undo" testId="task-undo" disabled={!t.canUndo} onClick={() => press("drawing-undo")} />
       <Btn icon={Redo2} label="Redo" testId="task-redo" disabled={!t.canRedo} onClick={() => press("drawing-redo")} />
-      <span className="flex-1" />
+      {/* Only when the toolbar has room for them (index.css, .task-room):
+          more of the panel's tools rather than a second row (owner, 12 Nov). */}
+      <span className="task-room items-center gap-[3px]" data-testid="task-room">
+        <span className="tb-sep" />
+        <Btn icon={Expand} label="Dilate" testId="task-dilate" title="Grow the drawing by one voxel" onClick={() => press("draw-dilate")} />
+        <Btn icon={Shrink} label="Erode" testId="task-erode" title="Shrink the drawing by one voxel" onClick={() => press("draw-erode")} />
+        <Btn icon={Waves} label="Smooth" testId="task-smooth" title="Smooth the drawing's edges" onClick={() => press("draw-smooth")} />
+      </span>
+      <span className="tb-sep" />
       <Btn icon={Save} label={t.saving ? "Saving…" : "Save mask"} testId="task-save" primary disabled={t.saving}
         title="Save the drawing as a named layer" onClick={() => press("drawing-save")} />
       <Btn icon={Check} label="Done" testId="task-done" title="Stop drawing" onClick={() => press("drawing-toggle")} />
@@ -97,7 +105,7 @@ export function AnalysingTools({ layer, onOpenReport }) {
           onClick={() => press(`mask-qc-check-${layer.id}`)} />
         <Btn icon={Layers} label="Atlas overlap" testId="task-overlap" title="Opens the atlas overlap table for this lesion"
           onClick={() => press(`overlap-fold-${layer.id}-toggle`, { reveal: true })} />
-        <span className="flex-1" />
+        <span className="tb-sep" />
         <Btn icon={FileText} label="Report…" testId="task-report" primary title="Opens the Report section with this lesion chosen"
           onClick={() => onOpenReport?.(layer.id)} />
       </>
@@ -107,7 +115,6 @@ export function AnalysingTools({ layer, onOpenReport }) {
     <>
       <Btn icon={Sigma} label="Clusters…" testId="task-clusters" title="Opens Cluster analysis with this map chosen"
         onClick={() => press(`clusters-open-${layer.id}`)} />
-      <span className="flex-1" />
     </>
   );
 }

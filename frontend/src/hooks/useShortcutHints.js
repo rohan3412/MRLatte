@@ -17,9 +17,6 @@ export function useShortcutHints(keys) {
       if (!("shortcutHints" in root.dataset)) return;
       delete root.dataset.shortcutHints;
       document.querySelectorAll("[data-shortcut]").forEach((el) => el.removeAttribute("data-shortcut"));
-      // The desktop app's see-through window kept showing the badges until
-      // something redrew beside them: ask for a full repaint.
-      window.mrlatte?.repaint?.();
     };
     const show = () => {
       for (const [selector, label] of Object.entries(keys)) {

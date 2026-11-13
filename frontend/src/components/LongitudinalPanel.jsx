@@ -3,6 +3,8 @@ import { GitCompareArrows, FileUp, AlertCircle, RefreshCw, Package } from "lucid
 import { longitudinalStatus, registerLongitudinal, LONGITUDINAL_MODULE_ID } from "@/lib/longitudinal";
 import { useModules } from "@/hooks/use-modules";
 import { toast } from "sonner";
+import { uploadLesion, fetchCompare } from "@/lib/lesionMetrics";
+import { useLqtpyFeature } from "@/hooks/useLqtpyFeature";
 
 /**
  * LongitudinalPanel — pick a baseline + follow-up scan, register them on the
@@ -145,8 +147,101 @@ export const LongitudinalPanel = ({ onDiffLoaded }) => {
           </div>
         </>
       )}
+      <LesionMaskCompare />
     </div>
   );
 };
+
+const cm3 = (mm3) => (mm3 / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 });
+// A region's percent damaged: one decimal below 10 %, so a small change doesn't read "0% → 0%".
+const pct = (v) => (Math.abs(v) < 10 ? Number(v).toFixed(1) : Math.round(v));
+const signed = (v, unit = "") => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 1 })}${unit}`;
+
+/**
+ * Two lesion masks of one patient (baseline and follow-up, or two drawings of
+ * one lesion): what changed, by lqtpy.compare (lqtpy 0.8.0+). Needs no
+ * registration: both masks must already be in the same space. Hidden on an
+ * older lqtpy.
+ */
+function LesionMaskCompare() {
+  const { modules } = useModules();
+  const available = useLqtpyFeature("compare", modules);
+  const [a, setA] = useState(null);
+  const [b, setB] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  if (!available) return null;
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const [aId, bId] = [await uploadLesion(a), await uploadLesion(b)];
+      setResult(await fetchCompare({ aLesionId: aId, bLesionId: bId }));
+    } catch (e) {
+      toast.error("Couldn't compare the masks", { description: e?.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickFile = (setter) => (e) => { setter(e.target.files?.[0] || null); setResult(null); };
+  const pick =
+    "flex items-center gap-2 cursor-pointer border border-dashed border-border bg-panel px-3 py-2 text-[12px] text-foreground hover:border-muted-foreground transition-colors";
+  const regions = (title, rows, testId) => rows?.length > 0 && (
+    <div data-testid={testId}>
+      <div className="text-subtle">{title}</div>
+      {rows.map((r) => (
+        <div key={r.name} className="flex justify-between gap-2">
+          <span className="truncate text-foreground">{String(r.name).replace(/_/g, " ")}</span>
+          <span className="shrink-0">{pct(r.a_pct)}% → {pct(r.b_pct)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-3 border-t border-border pt-3" data-testid="mask-compare">
+      <div className="flex items-center gap-2 cap text-subtle">
+        <GitCompareArrows size={11} /> two lesion masks
+      </div>
+      <label className={pick}>
+        <FileUp size={13} />
+        <span className="truncate flex-1">{a ? a.name : "Select the first mask (baseline)"}</span>
+        <input type="file" accept=".nii,.nii.gz" className="hidden" data-testid="mask-compare-a" onChange={pickFile(setA)} />
+      </label>
+      <label className={pick}>
+        <FileUp size={13} />
+        <span className="truncate flex-1">{b ? b.name : "Select the second mask (follow-up)"}</span>
+        <input type="file" accept=".nii,.nii.gz" className="hidden" data-testid="mask-compare-b" onChange={pickFile(setB)} />
+      </label>
+      <button
+        onClick={run}
+        disabled={busy || !a || !b}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12.5px] font-medium btn disabled:opacity-50"
+        data-testid="mask-compare-run"
+      >
+        <GitCompareArrows size={12} />{busy ? "Comparing…" : "Compare masks"}
+      </button>
+      {result && (
+        <div className="border border-border bg-panel p-3 font-mono text-[11px] text-muted-foreground space-y-2 rounded-lg" data-testid="mask-compare-result">
+          <div>
+            <div>volume: <span className="text-foreground">{cm3(result.volume.a_mm3)} → {cm3(result.volume.b_mm3)} cm³</span>{" "}
+              ({signed(result.volume.change_pct, "%")})</div>
+            <div>overlap: <span className="text-foreground">Dice {result.overlap.dice.toFixed(2)}</span>, Jaccard {result.overlap.jaccard.toFixed(2)}</div>
+            <div>centre moved: <span className="text-foreground">{result.centroid_shift_mm.toLocaleString(undefined, { maximumFractionDigits: 1 })} mm</span></div>
+          </div>
+          {regions("newly damaged", result.regions?.gained, "mask-compare-gained")}
+          {regions("no longer damaged", result.regions?.lost, "mask-compare-lost")}
+          {regions("changed", result.regions?.changed, "mask-compare-changed")}
+          {result.regions && !result.regions.gained?.length && !result.regions.lost?.length && !result.regions.changed?.length && (
+            <div>regions: no change of {result.regions.min_change_pct ?? 5} points or more</div>
+          )}
+        </div>
+      )}
+      <div className="text-[11.5px] text-subtle leading-relaxed">
+        Both masks must be in the same space (for example both in MNI). Regions are from the Desikan–Killiany–Tourville atlas. Compared by LQTpy.
+      </div>
+    </div>
+  );
+}
 
 export default LongitudinalPanel;

@@ -20,14 +20,18 @@ export const DEFAULT_PREFS = {
   startCrosshair: true,
   crosshairColor: "white",
   crosshairWidth: 1,
-  // The drawing's background quality check after a pause in drawing.
+  // The drawing's background quality check: after each stroke with lqtpy
+  // 0.8.0+, otherwise after a pause in drawing.
   idleQc: true,
   idleQcSeconds: 30,
+  // While drawing: the drawing's volume, slices and side, on the viewer
+  // (lib/drawingStats.js).
+  liveLesionStats: true,
   // The brief effects over the viewer (lib/viewer/effects.js); what the coming
   // performance mode will switch off. Reduce Motion in the OS switches them off too.
   visualEffects: true,
-  // How much of the desktop shows through the top bar, sidebar and menus
-  // (0 = opaque, the default) over the OS material; hooks/useWindowLook.js.
+  // How much of the app shows, blurred, through menus, dialogs and floating
+  // panels (0 = solid); hooks/useWindowLook.js.
   transparency: 20,
   // Off: transparency, frosted menus and the visual effects, all at once.
   performanceMode: false,

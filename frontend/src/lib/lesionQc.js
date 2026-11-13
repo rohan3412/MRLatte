@@ -10,7 +10,7 @@
 // all resolve to `null`. Callers MUST treat null as "QC has nothing to say
 // right now" and proceed exactly as if this module didn't exist — QC must
 // never be the reason a user can't save or download their work.
-import { getCapabilities, uploadLesion, fetchQc, fetchQcFix } from "@/lib/lesionMetrics";
+import { getCapabilities, uploadLesion, fetchQc, fetchQcFix, fetchLiveQc } from "@/lib/lesionMetrics";
 import { currentDrawingAsFile } from "@/lib/lesions";
 
 // A few seconds — long enough for a normal QC pass, short enough that a slow
@@ -100,6 +100,35 @@ export function runLesionQc(args = {}) {
   let timer;
   const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
   return Promise.race([runLesionQcUnbounded(args), deadline]).finally(() => clearTimeout(timer));
+}
+
+// lqtpy's say on whether a result should interrupt, where it gives one; else
+// the rule in needsAttention.
+const attentionOf = (result, flags) => (typeof result.needs_attention === "boolean"
+  ? result.needs_attention && needsAttention(flags)
+  : needsAttention(flags));
+
+/**
+ * The live check while drawing (lqtpy 0.8.0+, `qc.session`): the current
+ * drawing checked in its backend session `session`, in memory, nothing
+ * uploaded to disk. Fails open like runLesionQc: null on any error, or for an
+ * empty drawing. The caller asks only when capabilities list "qc.session".
+ */
+export async function runLiveQc({ viewerRef, session, mni, timeoutMs = LESION_QC_TIMEOUT_MS }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const file = await currentDrawingAsFile(viewerRef, "qc_live_drawing.nii.gz");
+    if (!file) return null;
+    const context = { labels_are_colours: true, ...(viewerRef?.current?.getDrawingContext?.() || {}) };
+    const result = await fetchLiveQc({ session, file, mni, context, signal: controller.signal });
+    const flags = (result.flags || []).filter((f) => !IGNORED_FLAG_IDS.has(f.id));
+    return { ...result, flags, needsAttention: attentionOf(result, flags), lesionId: null };
+  } catch (_e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function runLesionQcUnbounded({

@@ -16,6 +16,7 @@ in routers/roi.py, just without the extra indirection since there's no
 long-lived job to track.
 """
 import hashlib
+import json
 import logging
 import os
 import re
@@ -23,7 +24,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from deps import LESION_JOBS_DIR
@@ -257,9 +258,95 @@ def lesion_qc_fix_endpoint(payload: LesionQcFixRequest):
         )
 
 
+def _engine_call(what: str, fn, *args, **kwargs):
+    """Run an engine call, mapping its errors the way the endpoints above do."""
+    t0 = time.monotonic()
+    status = 200
+    try:
+        return fn(*args, **kwargs)
+    except engine.LesionMetricsError as exc:
+        status = exc.status_code
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — lqtpy's own typed errors land here
+        status = engine.status_code_for(exc)
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    finally:
+        logger.info("lesion %s duration_ms=%.2f status=%s", what, (time.monotonic() - t0) * 1000.0, status)
+
+
+class LesionFixPlanRequest(BaseModel):
+    lesion_id: str
+    finding_ids: Optional[List[str]] = None
+    threshold: Optional[float] = None
+    context: Optional[dict] = None
+    mni: bool = True
+
+
+@router.post("/lesion/qc/fix-plan")
+def lesion_qc_fix_plan_endpoint(payload: LesionFixPlanRequest):
+    """lqtpy 0.8.0+: each fix lqtpy can make, with the voxels it would add and
+    remove, for a preview (see engine.run_fix_plan). 503 on an older lqtpy."""
+    lesion_path = _resolve_lesion_path(payload.lesion_id)
+    threshold = payload.threshold if payload.threshold is not None else engine.DEFAULT_THRESHOLD
+    return _engine_call("qc fix-plan", engine.run_fix_plan, lesion_path, payload.finding_ids,
+                        threshold=threshold, context=payload.context, mni=payload.mni)
+
+
+_LIVE_KEY_RE = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
+
+
+@router.post("/lesion/qc/live")
+def lesion_qc_live_endpoint(file: UploadFile = File(...), session: str = Form(...),
+                            mni: bool = Form(True), context: Optional[str] = Form(None),
+                            tier: Optional[str] = Form(None)):
+    """lqtpy 0.8.0+: check the drawing being drawn, in memory (see
+    engine.live_check). `session` names the open drawing; `file` is the same
+    NIfTI Save would upload. Nothing is written to disk. 503 on an older lqtpy."""
+    if not _LIVE_KEY_RE.match(session or ""):
+        raise HTTPException(status_code=400, detail="Invalid session id.")
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    try:
+        ctx = json.loads(context) if context else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="context must be JSON.") from exc
+    if ctx is not None and not isinstance(ctx, dict):
+        raise HTTPException(status_code=400, detail="context must be a JSON object.")
+    return _engine_call("qc live", engine.live_check, session, data, mni=mni, context=ctx, tier=tier)
+
+
+@router.delete("/lesion/qc/live/{session}")
+def lesion_qc_live_close(session: str):
+    """Forget a drawing's live session (drawing switched off or cleared)."""
+    if not _LIVE_KEY_RE.match(session or ""):
+        raise HTTPException(status_code=400, detail="Invalid session id.")
+    return {"closed": engine.live_close(session)}
+
+
+class LesionCompareRequest(BaseModel):
+    a_lesion_id: str
+    b_lesion_id: str
+    threshold: Optional[float] = None
+
+
+@router.post("/lesion/compare")
+def lesion_compare_endpoint(payload: LesionCompareRequest):
+    """lqtpy 0.8.0+: what changed from mask a to mask b (see
+    engine.run_compare). 503 on an older lqtpy."""
+    a = _resolve_lesion_path(payload.a_lesion_id)
+    b = _resolve_lesion_path(payload.b_lesion_id)
+    threshold = payload.threshold if payload.threshold is not None else engine.DEFAULT_THRESHOLD
+    return _engine_call("compare", engine.run_compare, a, b, threshold=threshold)
+
+
 @router.get("/lesion/capabilities")
 def lesion_capabilities():
-    """Whether the lqtpy engine is usable right now, and on what atlases."""
+    """Whether the lqtpy engine is usable right now, and on what atlases.
+    `features`: lqtpy 0.8.0's own list of what this installation can do
+    ("qc.advice", "qc.fix_plan", "qc.session", "compare", ...); empty before."""
     if not engine.available():
         return {
             "available": False,
@@ -267,6 +354,7 @@ def lesion_capabilities():
             "disconnection_index_available": False,
             "qc_available": False,
             "atlas_ids": [],
+            "features": [],
             "reason": str(engine.import_error()) if engine.import_error() else None,
         }
     return {
@@ -275,4 +363,5 @@ def lesion_capabilities():
         "disconnection_index_available": engine.disconnection_index_available(),
         "qc_available": engine.qc_available(),
         "atlas_ids": engine.bridged_atlas_ids(),
+        "features": sorted(engine.features()),
     }

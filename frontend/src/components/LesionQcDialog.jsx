@@ -27,6 +27,19 @@ export const findingMM = (f) => {
   const mm = f?.locations?.[0]?.mm;
   return Array.isArray(mm) && mm.length >= 3 && mm.every((v) => Number.isFinite(v)) ? mm : null;
 };
+// The view a slice finding is about, as NiiVue numbers them (0 axial,
+// 1 coronal, 2 sagittal), or undefined.
+export const findingPlane = (f) => {
+  const i = ["axial", "coronal", "sagittal"].indexOf(String(f?.locations?.[0]?.plane || "").toLowerCase());
+  return i >= 0 ? i : undefined;
+};
+// Go to also shows the finding's view large: the Dashboard switches to the
+// asymmetric layout with that view in the big slot (owner, 12 Nov). An event,
+// since the dialog is opened from several places that don't own the layout.
+export const SHOW_PLANE_EVENT = "mrlatte:show-plane";
+const showPlane = (plane) => {
+  if (plane != null) window.dispatchEvent(new CustomEvent(SHOW_PLANE_EVENT, { detail: { plane } }));
+};
 const describeLocation = (f) => {
   const loc = f?.locations?.[0];
   if (!loc) return "";
@@ -43,9 +56,13 @@ export function LesionQcDialog({
   engineVersion,
   // lqtpy 0.6.0+ extras, all optional:
   verdict,          // the mask as a whole: "usable" / "usable with caution" / "fix before use" / "unusable"
-  onGoTo,           // (mm) => void — jump the viewer to a finding; the dialog closes
+  onGoTo,           // (mm, axCorSag?) => void — jump the viewer to a finding (and its view); the dialog closes
   onInterpolate,    // () => void — offered when slices were skipped; the dialog closes
   onFix,            // (finding) => void — lqtpy removes what it is sure doesn't belong; the dialog closes
+  // lqtpy 0.8.0+ (fix previews): (finding) => void, offered for every finding
+  // lqtpy can fix (`advice.fix_id`), adding voxels or removing them; shown on
+  // the image first, then applied or not. Replaces Fix where given.
+  onPreviewFix,
 }) {
   const hasGaps = flags.some((f) => f.id === "sparse_slices" && f.severity !== "info");
   const findings = flags.filter((f) => f.severity !== "info");
@@ -66,10 +83,24 @@ export function LesionQcDialog({
           {label}
         </div>
         <div className="text-[13px] text-foreground">{f.message}</div>
-        {f.suggestion && (
-          <div className="text-[12px] text-muted-foreground">{f.suggestion}</div>
+        {/* lqtpy 0.8.0's advice is written for the person fixing the mask;
+            the older `suggestion` may name lqtpy functions. */}
+        {(f.advice?.text || f.suggestion) && (
+          <div className="text-[12px] text-muted-foreground">{f.advice?.text || f.suggestion}</div>
         )}
-        {onFix && canAutoFix(f) && (
+        {onPreviewFix && f.advice?.fix_id ? (
+          <button
+            onClick={() => onPreviewFix(f)}
+            className="mt-1 mr-1.5 inline-flex items-center gap-1 cap text-foreground border border-warn/60 hover:border-warn px-1.5 py-0.5 transition-colors"
+            title={f.advice.adds_voxels
+              ? "Show the voxels this fix would add, then apply it or not. One Undo takes it back."
+              : "Show the voxels this fix would remove, then apply it or not. One Undo puts them back."}
+            data-testid={`lesion-qc-preview-${f.id}`}
+          >
+            <Wand2 size={10} />
+            Preview fix
+          </button>
+        ) : onFix && canAutoFix(f) && (
           <button
             onClick={() => onFix(f)}
             className="mt-1 mr-1.5 inline-flex items-center gap-1 cap text-foreground border border-warn/60 hover:border-warn px-1.5 py-0.5 transition-colors"
@@ -84,7 +115,7 @@ export function LesionQcDialog({
         )}
         {onGoTo && findingMM(f) && (
           <button
-            onClick={() => onGoTo(findingMM(f))}
+            onClick={() => { onGoTo(findingMM(f), findingPlane(f)); showPlane(findingPlane(f)); }}
             className="mt-1 inline-flex items-center gap-1 btn-mini"
             title="Close this and move the viewer to where the problem is"
             data-testid={`lesion-qc-goto-${f.id}`}

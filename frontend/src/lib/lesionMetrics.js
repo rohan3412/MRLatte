@@ -150,6 +150,48 @@ export async function fetchQcFix({ lesionId, findingIds, threshold, context, ret
 }
 
 // --------------------------------------------------------------------------- #
+// lqtpy 0.8.0 for drawing tools (backend/lesion_metrics.py): fix previews, the
+// live check while drawing, comparing two masks. Ask only when
+// `hasFeature(caps, ...)` says this lqtpy can; an older one answers 503.
+// --------------------------------------------------------------------------- #
+
+/** Whether the installed lqtpy lists a feature ("qc.fix_plan", "qc.session", "compare", ...). */
+export const hasFeature = (caps, name) => !!caps?.available && (caps.features || []).includes(name);
+
+const postJson = async (path, body) => {
+  const r = await fetch(`${apiBase}${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new LesionMetricsHttpError(await readErrorDetail(r), r.status);
+  return r.json();
+};
+
+/** Each fix lqtpy can make, with the voxels it would add and remove (base64 NIfTI masks). */
+export const fetchFixPlan = ({ lesionId, findingIds, context, mni = true }) =>
+  postJson("/api/lesion/qc/fix-plan", { lesion_id: lesionId, finding_ids: findingIds, context, mni });
+
+/** Check the drawing in `file` in its live session `session` (nothing is written on the server). */
+export async function fetchLiveQc({ session, file, mni = true, context, tier = "fast", signal }) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("session", session);
+  form.append("mni", String(!!mni));
+  if (context) form.append("context", JSON.stringify(context));
+  form.append("tier", tier);
+  const r = await fetch(`${apiBase}/api/lesion/qc/live`, { method: "POST", body: form, signal });
+  if (!r.ok) throw new LesionMetricsHttpError(await readErrorDetail(r), r.status);
+  return r.json();
+}
+
+/** Forget a drawing's live session. Best effort. */
+export const closeLiveQc = (session) =>
+  fetch(`${apiBase}/api/lesion/qc/live/${encodeURIComponent(session)}`, { method: "DELETE" }).catch(() => {});
+
+/** What changed from mask a to mask b: volume, overlap, centroid shift, regions. */
+export const fetchCompare = ({ aLesionId, bLesionId }) =>
+  postJson("/api/lesion/compare", { a_lesion_id: aLesionId, b_lesion_id: bLesionId });
+
+// --------------------------------------------------------------------------- #
 // Report fragments — lqtpy's embeddable HTML sections (morphometry detail,
 // network rollup, streamline disconnection, ...) for parts of the report
 // MRLatte doesn't render itself. See backend/lesion_metrics.py::
